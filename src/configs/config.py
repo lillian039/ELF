@@ -132,6 +132,8 @@ def load_config_from_yaml(path: str) -> Config:
     if not path or not os.path.isfile(path):
         return config
 
+    config_dir = os.path.dirname(os.path.abspath(path))
+
     with open(path, "r") as f:
         cfg_dict = yaml.safe_load(f) or {}
 
@@ -142,7 +144,17 @@ def load_config_from_yaml(path: str) -> Config:
             setattr(config, key, value)
 
     if config.sampling_configs_path:
-        config.sampling_configs = load_sampling_configs(config.sampling_configs_path)
+        sampling_path = config.sampling_configs_path
+        if not os.path.isabs(sampling_path):
+            candidate = os.path.join(config_dir, sampling_path)
+            if os.path.isfile(candidate):
+                sampling_path = candidate
+            else:
+                repo_src_candidate = os.path.join(os.path.dirname(os.path.dirname(config_dir)), sampling_path)
+                if os.path.isfile(repo_src_candidate):
+                    sampling_path = repo_src_candidate
+        config.sampling_configs_path = sampling_path
+        config.sampling_configs = load_sampling_configs(sampling_path)
 
     return config
 
