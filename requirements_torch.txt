@@ -13,3 +13,7 @@ rouge-score>=0.1.2
 sentencepiece>=0.2.0
 safetensors>=0.4.3
 basedpyright>=1.31.3
+jax>=0.4.30
+jaxlib>=0.4.30
+orbax-checkpoint>=0.6.1
+flax>=0.8.5
