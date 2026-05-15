@@ -19,7 +19,7 @@ The original upstream code remains unchanged under `src/`. The PyTorch path live
 1. Official pretrained model checkpoints are still JAX/Orbax-native.
 2. Muon optimizer is not yet ported; `train_torch.py` falls back to AdamW.
 3. Training parity is approximate because TPU sharding / JAX RNG semantics are not replicated exactly.
-4. The conversion helper currently expects an exported Python-loadable JAX tree rather than a raw Orbax directory.
+4. The final JAX->PyTorch parameter-name mapping is still incomplete; the current bridge exports/restores Orbax trees and produces inspectable payloads.
 
 ## Environment setup
 
@@ -69,12 +69,32 @@ Current status from direct inspection:
 - `embedded-language-flows/ELF-B-owt`, `ELF-B-de-en`, and `ELF-B-xsum` expose Orbax/OCDBT checkpoint directories rather than native PyTorch weights.
 - `embedded-language-flows/t5_small_encoder_jax` exposes `t5_small_encoder_jax.pkl` directly.
 
-If you have already exported the JAX tree:
+If you want to export directly from the public Orbax/OCDBT Hugging Face checkpoint:
+
+```bash
+.venv/bin/python scripts/export_orbax_checkpoint.py \
+  --input embedded-language-flows/ELF-B-owt \
+  --output outputs/exported/elf_b_owt_tree.pkl
+```
+
+Then convert the exported EMA tree into a loadable PyTorch checkpoint:
 
 ```bash
 .venv/bin/python scripts/convert_jax_checkpoint_to_torch.py \
-  --input /path/to/exported_jax_tree.pkl \
-  --output outputs/converted/elf_b_owt_inspect.pt
+  --input outputs/exported/elf_b_owt_tree.pkl \
+  --output outputs/converted/elf_b_owt_ema.pt \
+  --config src/configs/training_configs/train_owt_ELF-B.yml
+```
+
+Run a pretrained smoke evaluation with the converted checkpoint:
+
+```bash
+.venv/bin/python src/eval_torch.py \
+  --config src/configs/training_configs/train_owt_ELF-B.yml \
+  --config_override max_length=8 \
+  --config_override output_dir=outputs/torch-pretrained-smoke \
+  --checkpoint_path outputs/converted/elf_b_owt_ema.pt \
+  --num_samples 1
 ```
 
 ### 3. Start PyTorch training reproduction
@@ -110,4 +130,14 @@ Eval smoke test output:
 INFO - __main__ - checkpoint_status=random-init
 INFO - __main__ - Saved 1 samples to outputs/torch-smoke/torch_eval_samples.jsonl
 INFO - __main__ - sample[0]='iediediediediediediedied'
+```
+
+Orbax export + converted-checkpoint smoke output:
+
+```text
+Exported Orbax tree from .../checkpoint_0 to outputs/exported/elf_b_owt_tree.pkl
+Saved loadable PyTorch checkpoint to outputs/converted/elf_b_owt_ema.pt
+INFO - __main__ - checkpoint_status=outputs/converted/elf_b_owt_ema.pt
+INFO - __main__ - Saved 1 samples to outputs/torch-pretrained-smoke/torch_eval_samples.jsonl
+INFO - __main__ - sample[0]='Nvybence ofcurivis'
 ```
