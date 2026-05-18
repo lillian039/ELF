@@ -45,7 +45,21 @@ def parse_args():
 
 def create_optimizer(config: Any, model: torch.nn.Module, learning_rate: float):
     if config.optimizer == "muon":
-        logger.warning("Muon is not available in this PyTorch port yet; falling back to AdamW.")
+        from torch_elf.muon import MuonWithAdamW
+
+        matrix_params: list[torch.nn.Parameter] = []
+        scalar_params: list[torch.nn.Parameter] = []
+        for p in model.parameters():
+            (matrix_params if p.ndim >= 2 else scalar_params).append(p)
+        logger.info("Muon optimizer: %d matrix params, %d scalar params", len(matrix_params), len(scalar_params))
+        return MuonWithAdamW(
+            [
+                {"params": matrix_params, "use_muon": True, "lr": learning_rate, "weight_decay": config.weight_decay},
+                {"params": scalar_params, "use_muon": False, "lr": learning_rate * 0.1, "betas": (config.adam_b1, config.adam_b2), "weight_decay": config.weight_decay},
+            ],
+            lr=learning_rate,
+            weight_decay=config.weight_decay,
+        )
     return torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(config.adam_b1, config.adam_b2), weight_decay=config.weight_decay)
 
 
