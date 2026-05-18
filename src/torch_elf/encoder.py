@@ -29,6 +29,10 @@ class T5TextEncoder:
 
     @torch.no_grad()
     def encode(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        if attention_mask.is_floating_point():
+            attention_mask = attention_mask.to(dtype=torch.bool)
+        if attention_mask.dim() == 3:
+            attention_mask = attention_mask[:, 0, :] if attention_mask.size(1) == attention_mask.size(2) else attention_mask.any(dim=1)
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
         latents = outputs.last_hidden_state
         return (latents - self.latent_mean) / self.latent_std

@@ -193,7 +193,7 @@ def apply_config_overrides(config: Config, overrides: list) -> Config:
 
         if original_value is None:
             # Use type annotation to infer the intended type
-            annotated_type = config.__annotations__.get(field_name)
+            annotated_type = type(config).__annotations__.get(field_name)
             if annotated_type == int:
                 converted_value = int(value_str)
             elif annotated_type == float:
