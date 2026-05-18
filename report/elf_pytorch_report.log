@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026/Homebrew) (preloaded format=xelatex 2026.3.4)  19 MAY 2026 02:06
+This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026/Homebrew) (preloaded format=xelatex 2026.3.4)  19 MAY 2026 04:04
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -603,13 +603,33 @@ Overfull \hbox (0.37221pt too wide) in paragraph at lines 105--107
 to_torch.py \TU/lmr/m/n/10.95 performs exact parameter name map-
  []
 
-[2] [3] [4] [5] (/home/azuma/ELF/report/elf_pytorch_report.aux)
+[2]
+Underfull \hbox (badness 1137) in paragraph at lines 184--184
+[]\TU/lmr/m/n/10.95 Table 3: []Unigram token entropy from PyTorch ELF checkpoin
+ts. Paper baseline from
+ []
+
+[3]
+! Too many }'s.
+l.191 ...12 or a transformers/safetensors update.}
+                                                  
+You've closed more groups than you opened.
+Such booboos are generally harmless, so keep going.
+
+[4] [5] [6] (/home/azuma/ELF/report/elf_pytorch_report.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
  ***********
-Package rerunfilecheck Info: File `elf_pytorch_report.out' has not changed.
-(rerunfilecheck)             Checksum: 91E197AFFDA048760BBCC494DB71DE5B;2911.
+
+
+Package rerunfilecheck Warning: File `elf_pytorch_report.out' has changed.
+(rerunfilecheck)                Rerun to get outlines right
+(rerunfilecheck)                or use package `bookmark'.
+
+Package rerunfilecheck Info: Checksums for `elf_pytorch_report.out':
+(rerunfilecheck)             Before: 91E197AFFDA048760BBCC494DB71DE5B;2911
+(rerunfilecheck)             After:  E0ECB360E0E297CC4BBEE58FCE17D2A6;3072.
  ) 
 Here is how much of TeX's memory you used:
  13882 strings out of 468168
@@ -618,6 +638,6 @@ Here is how much of TeX's memory you used:
  42449 multiletter control sequences out of 15000+600000
  635039 words of font info for 83 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 73i,8n,79p,300b,406s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 73i,9n,79p,300b,450s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on /home/azuma/ELF/report/elf_pytorch_report.pdf (5 pages).
+Output written on /home/azuma/ELF/report/elf_pytorch_report.pdf (6 pages).
