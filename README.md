@@ -1,10 +1,17 @@
 # ELF: Embedded Language Flows
 
 [![arXiv](https://img.shields.io/badge/arXiv-2605.10938-b31b1b.svg)](https://arxiv.org/abs/2605.10938)&nbsp;
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)&nbsp;
-[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-ELF-blue.svg)](https://huggingface.co/embedded-language-flows)&nbsp;
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-ELF-yellow.svg)](https://huggingface.co/embedded-language-flows)&nbsp;
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)&nbsp;
 
-This is the official JAX implementation for the paper *ELF: Embedded Language Flows*. This code is written and tested on TPUs. A PyTorch version is available on the [`pytorch_elf`](https://github.com/lillian039/ELF/tree/pytorch_elf) branch.
+This is the official JAX implementation for the paper *ELF: Embedded Language Flows*. This code is written and tested on TPUs. A PyTorch version is available on the [`pytorch_elf`](https://github.com/lillian039/ELF/tree/pytorch_elf) branch, and a PyTorch implementation of progressive distillation (PD), which distills a many-step ELF teacher into a few-step student, is available on the [`distillation`](https://github.com/lillian039/ELF/tree/distillation) branch (see the [blog post](https://linlu-qiu.github.io/assets/html/elf_pd.html) for details).
+
+## Updates
+
+- **June 26, 2026**: Added the PyTorch progressive distillation (PD) code on the [`distillation`](https://github.com/lillian039/ELF/tree/distillation) branch.
+- **Initial release**: JAX/TPU code, plus a PyTorch version on the [`pytorch_elf`](https://github.com/lillian039/ELF/tree/pytorch_elf) branch.
+
+## Overview
 
 ELF is a class of continuous diffusion language models based on continuous-time Flow Matching. Unlike existing DLMs, ELF predominantly stays within the continuous embedding space until the final time step, where it maps to discrete tokens using a shared-weight network. This formulation makes it straightforward to adapt established techniques from image-domain diffusion models, e.g., classifier-free guidance (CFG).
 
