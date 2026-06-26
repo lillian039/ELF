@@ -87,6 +87,9 @@ class Config:
     adam_b1: float = 0.9
     adam_b2: float = 0.95
     grad_accum_steps: int = 1  # Gradient accumulation steps (optimizer updates every K mini-batches)
+    use_bf16: bool = True  # Use CUDA BF16 autocast for training/eval forward passes.
+    use_compile: bool = False  # Wrap the eval/sampling model in torch.compile.
+    gradient_checkpointing: bool = False  # Save activation memory by recomputing ELF blocks during backward.
 
     # EMA
     ema_decay1: float = 0.9999
@@ -121,9 +124,21 @@ class Config:
     wandb_tag: str = None
     wandb_resume: str = "allow"
 
+    # Progressive distillation: when set, distill a frozen ELF teacher into the
+    # student (PD on the denoiser branch, CE on the decoder branch).
+    teacher_path: str = None
+    initialize_student_from_teacher: bool = True  # Copy teacher weights into student at step 0.
+    teacher_use_ema: bool = True  # Load teacher from ema_params1 (smoother) when available.
+    student_init_from_checkpoint: str = None  # Warm-start from a previous round (overrides teacher init).
+
+    pd_teacher_steps: int = 1  # teacher Euler sub-steps used to build the PD target
+    pd_step_size: float = 0.0  # student step span (= 1/N for an N-step student)
+    pd_student_schedule: str = "uniform"  # "uniform" or "logit_normal"
+    pd_teacher_schedule: str = "uniform"  # "uniform" or "logit_normal"
+
     # Misc
     seed: int = 0
-    num_workers: int = 0
+    num_workers: int = 8
 
 
 def load_config_from_yaml(path: str) -> Config:
@@ -149,28 +164,28 @@ def load_config_from_yaml(path: str) -> Config:
 
 def apply_config_overrides(config: Config, overrides: list) -> Config:
     """Apply command-line config overrides to a Config object.
-    
+
     Args:
         config: Config object to modify
         overrides: List of strings in format "field_name=value"
-    
+
     Returns:
         Modified config object
     """
     if not overrides:
         return config
-    
+
     for override in overrides:
         if "=" not in override:
             raise ValueError(f"Invalid override format: '{override}'. Expected 'field_name=value'")
-        
+
         field_name, value_str = override.split("=", 1)
         field_name = field_name.strip()
         value_str = value_str.strip()
-        
+
         if not hasattr(config, field_name):
             raise ValueError(f"Config has no field named '{field_name}'")
-        
+
         original_value = getattr(config, field_name)
         original_type = type(original_value)
 
@@ -200,7 +215,7 @@ def apply_config_overrides(config: Config, overrides: list) -> Config:
             converted_value = value_str
         else:
             converted_value = value_str
-        
+
         setattr(config, field_name, converted_value)
 
     return config

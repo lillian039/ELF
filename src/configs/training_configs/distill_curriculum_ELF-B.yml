@@ -1,0 +1,91 @@
+# Progressive-distillation config for ELF-B on OpenWebText.
+#
+# Launch one round with:
+#   bash scripts/launch.sh distill src/configs/training_configs/distill_curriculum_ELF-B.yml
+#
+# `teacher_path` defaults to the released teacher (pulled from HuggingFace); set
+# it to a local checkpoint from `scripts/launch.sh train` to use your own.
+# The student keeps the teacher's architecture; the denoiser branch is trained
+# with progressive distillation (MSE to the teacher's PD target) and the decoder
+# branch with cross-entropy.
+#
+# Curriculum (shrink the student's step count round by round): run successive
+# rounds, warm-starting each from the previous round's checkpoint via
+# --config_override. The teacher is the ORIGINAL ELF in every round, and
+# pd_teacher_steps is the Euler precision it uses to build the PD target.
+#   round 1: pd_step_size=0.0625 (16 steps), initialize_student_from_teacher=true
+#   round 2: pd_step_size=0.125  ( 8 steps), student_init_from_checkpoint=<round1>
+#   round 3: pd_step_size=0.25   ( 4 steps), student_init_from_checkpoint=<round2>
+#   round 4: pd_step_size=0.5    ( 2 steps), student_init_from_checkpoint=<round3>
+#   round 5: pd_step_size=1.0    ( 1 step ), student_init_from_checkpoint=<round4>
+
+# --- Dataset / encoder / arch (identical to the single-shot distill config) ---
+data_path: "embedded-language-flows/openwebtext-t5"
+max_length: 1024
+
+encoder_model_name: t5-small
+latent_mean: 0.0
+latent_std: 0.2
+
+model: ELF-B
+bottleneck_dim: 128
+num_time_tokens: 4
+num_self_cond_cfg_tokens: 4
+num_model_mode_tokens: 4
+
+denoiser_p_mean: -1.5
+denoiser_p_std: 0.8
+denoiser_noise_scale: 2.0
+t_eps: 0.05
+time_schedule: "logit_normal"
+
+# --- Decoder + self-cond + SC-CFG (carried over) ---
+decoder_prob: 0.2
+decoder_noise_scale: 5.0
+decoder_p_mean: 0.8
+decoder_p_std: 0.8
+self_cond_prob: 0.5
+
+# --- Distillation knobs (progressive distillation; override per round) ---
+pd_teacher_steps: 4
+pd_step_size: 0.0625    # student step span = 1/16 (round 1); override per round
+pd_student_schedule: logit_normal
+pd_teacher_schedule: logit_normal
+self_cond_cfg_min: 0.5
+self_cond_cfg_max: 5.0
+
+teacher_path: "embedded-language-flows/ELF-B-owt-torch"  # released teacher (HF), or a local checkpoint dir
+initialize_student_from_teacher: true
+teacher_use_ema: true
+student_init_from_checkpoint: null  # set per round (k>1) via --config_override
+
+# --- Training (per-round) ---
+epochs: 1
+global_batch_size: 512
+blr: 0.001
+weight_decay: 0.0
+warmup_epochs: 0.1
+warmup_steps: -1
+optimizer: muon
+
+ema_decay1: 0.9999
+
+# --- Sampling ---
+sampling_configs_path: "src/configs/sampling_configs/uncond_fewstep_sampling_configs.yml"
+num_samples: 500
+
+# --- Logging / checkpointing ---
+log_freq: 100
+save_freq: 1
+eval_freq: 1
+
+output_dir: "outputs/elf_b-owt_progressive_distillation/round1_16step"  # overridden per round
+hf_repo_id: null
+resume: null
+
+use_wandb: true
+wandb_project: elf
+wandb_entity: null
+wandb_run_name: elf_b-owt_progressive_distillation_round1_16step  # overridden per round
+
+seed: 42

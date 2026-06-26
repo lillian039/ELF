@@ -1,14 +1,13 @@
 - sampling_method: sde
-  num_sampling_steps: [32]
+  num_sampling_steps: [1, 2, 4, 8]
   cfgs: [1]
   sde_gamma: 1.5
-  self_cond_cfg_scales: [3]
+  self_cond_cfg_scales: [2.5]
   time_schedule: logit_normal
 
-
 - sampling_method: sde
-  num_sampling_steps: [64]
+  num_sampling_steps: [16, 32]
   cfgs: [1]
-  sde_gamma: 1.0
-  self_cond_cfg_scales: [3]
+  sde_gamma: 2.0
+  self_cond_cfg_scales: [2.0]
   time_schedule: logit_normal

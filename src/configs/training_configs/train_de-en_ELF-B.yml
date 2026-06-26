@@ -47,7 +47,7 @@ optimizer: muon
 ema_decay1: 0.9999
 
 # Sampling
-sampling_configs_path: "configs/sampling_configs/cond_sampling_configs.yml"
+sampling_configs_path: "src/configs/sampling_configs/cond_sampling_configs.yml"
 num_samples: 5000
 
 # Logging & Checkpointing

@@ -4,7 +4,6 @@ max_length: 1024
 
 # Encoder
 encoder_model_name: t5-small
-encoder_checkpoint: "embedded-language-flows/t5_small_encoder_jax/t5_small_encoder_jax.pkl"
 latent_mean: 0.0
 latent_std: 0.2
 
@@ -44,7 +43,7 @@ optimizer: muon  # "adamw" or "muon"
 ema_decay1: 0.9999
 
 # Sampling
-sampling_configs_path: "configs/sampling_configs/uncond_sampling_configs.yml"
+sampling_configs_path: "src/configs/sampling_configs/uncond_sampling_configs.yml"
 num_samples: 1000
 
 # Logging & Checkpointing

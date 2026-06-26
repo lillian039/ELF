@@ -1,39 +1,60 @@
 import json
+import os
 from typing import Dict, Optional
 
-import jax
-import jax.numpy as jnp
 import numpy as np
-from datasets import DatasetDict, load_dataset as hf_load_dataset, load_from_disk
+import torch
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from utils.encoder_utils import build_self_attn_cond_masks
 from utils.logging_utils import log_for_0
 
-PRNGKey = jax.random.PRNGKey
+
+def _process_count() -> int:
+    try:
+        import torch.distributed as dist
+        if dist.is_available() and dist.is_initialized():
+            return dist.get_world_size()
+    except Exception:
+        pass
+    return 1
 
 
-def get_pad_token_id(tokenizer, pad_token="pad"):
+def _process_index() -> int:
+    try:
+        import torch.distributed as dist
+        if dist.is_available() and dist.is_initialized():
+            return dist.get_rank()
+    except Exception:
+        pass
+    return 0
+
+
+def get_pad_token_id(tokenizer, pad_token: str = "pad") -> int:
     """Resolve the token id used for padding, optionally using EOS as pad."""
     token_id = tokenizer.eos_token_id if pad_token == "eos" else tokenizer.pad_token_id
     if token_id is None:
-        raise ValueError(
-            f"Tokenizer has no pad_token_id or eos_token_id."
-        )
+        raise ValueError("Tokenizer has no pad_token_id or eos_token_id.")
     return token_id
 
 
-def prepare_batch(batch: Dict, config, rng: PRNGKey):
-    """Convert numpy batch to JAX arrays and sample label-drop decisions."""
-    result = {k: jnp.array(v) if isinstance(v, np.ndarray) else v for k, v in batch.items()}
-    input_ids = jnp.array(batch["input_ids"])
-    batch_size = input_ids.shape[0]
+def prepare_batch(batch: Dict, config, generator: torch.Generator) -> Dict:
+    """Convert numpy batch to torch tensors and sample label-drop decisions."""
+    result = {}
+    for k, v in batch.items():
+        if isinstance(v, np.ndarray):
+            result[k] = torch.from_numpy(v)
+        elif isinstance(v, torch.Tensor):
+            result[k] = v
+        else:
+            result[k] = v
 
-    label_drop_mask = jnp.zeros((batch_size,), dtype=jnp.bool_)
+    batch_size = result["input_ids"].shape[0]
+    label_drop_mask = torch.zeros((batch_size,), dtype=torch.bool)
     if config.label_drop_prob > 0:
-        rng, drop_rng = jax.random.split(rng)
-        label_drop_mask = jax.random.uniform(drop_rng, (batch_size,)) < config.label_drop_prob
+        u = torch.rand((batch_size,), generator=generator)
+        label_drop_mask = u < config.label_drop_prob
     result["label_drop_mask"] = label_drop_mask
     return result
 
@@ -98,10 +119,11 @@ def get_dataloader(
     common = dict(
         batch_size=batch_size, num_workers=num_workers, collate_fn=collate_fn,
         drop_last=drop_last, persistent_workers=num_workers > 0,
+        pin_memory=True,
     )
     if distributed:
         sampler = DistributedSampler(
-            dataset, num_replicas=jax.process_count(), rank=jax.process_index(),
+            dataset, num_replicas=_process_count(), rank=_process_index(),
             shuffle=shuffle, drop_last=drop_last,
         )
         return DataLoader(dataset, sampler=sampler, **common)
@@ -109,11 +131,7 @@ def get_dataloader(
 
 
 def load_jsonl_dataset(path, tokenizer, input_key="input", output_key="output"):
-    """Load a JSONL eval set (one `{input, output}` example per line).
-
-    Triggered by `eval.py` whenever `config.eval_data_path` ends with `.jsonl`;
-    otherwise the standard `datasets.load_from_disk` Arrow path is used.
-    """
+    """Load a JSONL eval set (one `{input, output}` example per line)."""
     examples = []
     with open(path, "r", encoding="utf-8") as f:
         for i, line in enumerate(f):
@@ -136,9 +154,7 @@ def load_jsonl_dataset(path, tokenizer, input_key="input", output_key="output"):
 # ============================================
 
 def _looks_like_save_to_disk_arrow(ds) -> bool:
-    """HF datasets uploaded via `save_to_disk` get loaded as a fake 1-row dataset
-    where the columns are internal metadata fields like `_data_files`, `_fingerprint`,
-    etc. Detect that here so we can fall back to `load_from_disk`."""
+    """Detect HF datasets uploaded via `save_to_disk` (returns 1-row of metadata)."""
     return (
         len(ds) == 1
         and any(c.startswith("_") for c in ds.column_names)
@@ -147,44 +163,45 @@ def _looks_like_save_to_disk_arrow(ds) -> bool:
 
 
 def load_dataset_split(path: str, dataset_cache_dir=None):
-    """Load a dataset. Tries HuggingFace Hub first; falls back to local on-disk Arrow.
+    """Load a dataset, preferring a lock-free path that survives multi-rank concurrency.
 
-    For HF repos uploaded via `dataset.save_to_disk()` instead of `push_to_hub()`,
-    `load_dataset` silently returns a 1-row dataset of internal metadata. We detect
-    that and re-download the repo, then load it via `load_from_disk`.
+    `datasets.load_dataset()` guards `download_and_prepare` with a SINGLE FileLock; when
+    many ranks hit it at once on a networked cache (NFS/Lustre) the lock manager returns
+    `OSError: [Errno 37] No locks available` (ENOLCK). So we try `snapshot_download`
+    (per-file locks, survives heavy concurrency) + `load_from_disk` (takes no lock at all)
+    first, and only fall back to `datasets.load_dataset()` for repos that aren't in the
+    `save_to_disk` on-disk Arrow format.
     """
+    from datasets import DatasetDict, load_dataset as hf_load_dataset, load_from_disk
+    from huggingface_hub import snapshot_download
     ds = None
     try:
-        ds = hf_load_dataset(path, cache_dir=dataset_cache_dir)
+        local_dir = path if os.path.isdir(path) else snapshot_download(
+            repo_id=path, repo_type="dataset", cache_dir=dataset_cache_dir
+        )
+        ds = load_from_disk(local_dir)
     except Exception:
-        ds = load_from_disk(path)
+        ds = None
+    if ds is None:
+        ds = hf_load_dataset(path, cache_dir=dataset_cache_dir)
 
-    # Normalize DatasetDict -> single split before detection.
     if isinstance(ds, DatasetDict):
         splits = list(ds.keys())
         if len(splits) != 1:
-            raise ValueError(
-                f"Expected dataset at {path!r} to have a single split, got {splits}."
-            )
+            raise ValueError(f"Expected dataset at {path!r} to have a single split, got {splits}.")
         ds = ds[splits[0]]
 
-    # save_to_disk-style HF repo: fall back via snapshot_download + load_from_disk.
     if _looks_like_save_to_disk_arrow(ds):
-        from huggingface_hub import snapshot_download
         log_for_0(
             f"Dataset at {path!r} looks like a save_to_disk-format HF repo; "
             f"re-downloading via snapshot_download + load_from_disk."
         )
-        local_dir = snapshot_download(
-            repo_id=path, repo_type="dataset", cache_dir=dataset_cache_dir,
-        )
+        local_dir = snapshot_download(repo_id=path, repo_type="dataset", cache_dir=dataset_cache_dir)
         ds = load_from_disk(local_dir)
         if isinstance(ds, DatasetDict):
             splits = list(ds.keys())
             if len(splits) != 1:
-                raise ValueError(
-                    f"Expected dataset at {path!r} to have a single split, got {splits}."
-                )
+                raise ValueError(f"Expected dataset at {path!r} to have a single split, got {splits}.")
             ds = ds[splits[0]]
 
     ds.set_format(type="numpy", columns=ds.column_names)
@@ -203,5 +220,4 @@ def load_dataset(config, dataset_cache_dir=None):
         log_for_0(f"Eval size: {len(eval_dataset)}")
     else:
         log_for_0("No eval dataset")
-
     return train_dataset, eval_dataset

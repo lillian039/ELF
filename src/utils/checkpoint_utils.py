@@ -1,15 +1,12 @@
 import logging
 import os
-import pickle
 import re
 from typing import Any, Optional, Tuple
 
-import jax
-import jax.numpy as jnp
-from flax import serialization
-from flax.training import checkpoints
+import torch
 
-from utils.logging_utils import log_for_0
+from utils.logging_utils import log_for_0, _process_index
+from utils.train_utils import unwrap_model
 
 
 def _local_path(path: str) -> str:
@@ -17,17 +14,15 @@ def _local_path(path: str) -> str:
 
 
 def upload_output_dir_to_hf(output_dir: str, hf_repo_id: Optional[str], reason: str = "artifacts"):
-    if not hf_repo_id or jax.process_index() != 0:
+    if not hf_repo_id or _process_index() != 0:
         return
-
     folder_path = _local_path(output_dir)
     if not os.path.isdir(folder_path):
-        log_for_0(f"HF upload skipped; output directory does not exist: {folder_path}", level=logging.WARNING)
+        log_for_0(f"HF upload skipped; output directory does not exist: {folder_path}",
+                  level=logging.WARNING)
         return
-
     try:
         from huggingface_hub import HfApi
-
         repo_id = hf_repo_id.strip("/")
         api = HfApi()
         api.create_repo(repo_id, repo_type="model", exist_ok=True)
@@ -45,106 +40,41 @@ def _split_hf_path(path: str, min_parts: int) -> Optional[Tuple[str, str]]:
         return None
     if os.path.exists(_local_path(path)):
         return None
-
     parts = path.split("/")
     if len(parts) < min_parts:
         return None
-
-    repo_id = "/".join(parts[:2])
-    sub_path = "/".join(parts[2:])
-    return repo_id, sub_path
+    return "/".join(parts[:2]), "/".join(parts[2:])
 
 
-
-def save_checkpoint(state: Any, output_dir: str, step: int, hf_repo_id: str = None):
-    """Save model checkpoint locally, optionally mirroring the output dir to HF."""
-    state = jax.device_get(jax.tree_util.tree_map(lambda x: x[0], state))
-    state_dict = {
-        "params": state.params,
-        "ema_params1": state.ema_params1,
-        "opt_state": state.opt_state,
-        "step": int(state.step),
-        "epoch": int(state.epoch),
-        "dropout_rng": state.dropout_rng,
-    }
-
+def save_checkpoint(state, output_dir: str, step: int, hf_repo_id: str = None):
+    """Save model checkpoint locally as a single `checkpoint_<step>` file."""
+    if _process_index() != 0:
+        return
     ckpt_dir = _local_path(output_dir)
     os.makedirs(ckpt_dir, exist_ok=True)
-    log_for_0(f"Saving checkpoint to {ckpt_dir}")
-
-    checkpoints.save_checkpoint_multiprocess(
-        ckpt_dir, state_dict, step, keep=10, overwrite=True,
-    )
-
-    log_for_0(f"Checkpoint written to {ckpt_dir}")
+    inner_model = unwrap_model(state.model)
+    grad_accum_buffers = {}
+    if getattr(state, "grad_accum_buffers", None):
+        for name, param in inner_model.named_parameters():
+            buf = state.grad_accum_buffers.get(id(param))
+            if buf is not None:
+                grad_accum_buffers[name] = buf.detach().cpu()
+    payload = {
+        "params": inner_model.state_dict(),
+        "ema_params1": state.ema_params1,
+        "opt_state": state.optimizer.state_dict(),
+        "lr_scheduler": state.lr_scheduler.state_dict() if state.lr_scheduler is not None else None,
+        "step": int(state.step),
+        "epoch": int(state.epoch),
+        "dropout_rng": (state.dropout_generator.get_state()
+                        if state.dropout_generator is not None else None),
+        "grad_accum_buffers": grad_accum_buffers,
+    }
+    out_path = os.path.join(ckpt_dir, f"checkpoint_{step}")
+    log_for_0(f"Saving checkpoint to {out_path}")
+    torch.save(payload, out_path)
+    log_for_0(f"Checkpoint written to {out_path}")
     upload_output_dir_to_hf(output_dir, hf_repo_id, reason="checkpoint")
-
-# ============================================
-# Encoder checkpoint (single pickle file)
-# ============================================
-
-def load_encoder_checkpoint(checkpoint_path: str):
-    """Load a pickled encoder checkpoint from HF first, then local fallback.
-
-    HF form: '<org>/<repo>/<filename>'.
-    """
-    if not checkpoint_path:
-        raise ValueError(
-            "encoder_checkpoint is not set. Provide a local path or HF Hub path "
-            "like 'embedded-language-flows/t5_small_encoder_jax/t5_small_encoder_jax.pkl'."
-        )
-
-    log_for_0(f"Loading encoder checkpoint from {checkpoint_path}...")
-    loaded_params, loaded_from = None, None
-    errors = []
-
-    try:
-        hf_path = _download_hf_file(checkpoint_path)
-        if hf_path:
-            loaded_params = _load_pickle(hf_path)
-            loaded_from = "HF"
-    except Exception as e:
-        errors.append(f"HF: {e}")
-        log_for_0(f"HF encoder checkpoint load failed ({e}); falling back to local path.")
-
-    if loaded_params is None:
-        local_path = _local_path(checkpoint_path)
-        try:
-            loaded_params = _load_pickle(local_path)
-            loaded_from = "local"
-        except Exception as e:
-            errors.append(f"local: {e}")
-            raise FileNotFoundError(
-                f"Failed to load encoder checkpoint from {checkpoint_path}. "
-                f"Tried: {'; '.join(errors)}"
-            ) from e
-
-    if isinstance(loaded_params, dict) and "params" in loaded_params:
-        loaded_params = loaded_params["params"]
-    log_for_0(f"Loaded {loaded_from} encoder checkpoint.")
-    return loaded_params
-
-
-def _load_pickle(path: str):
-    log_for_0(f"Loading encoder checkpoint from {path}...")
-    with open(path, "rb") as f:
-        return pickle.load(f)
-
-
-def _download_hf_file(path: str) -> Optional[str]:
-    """Download a single file from HF Hub and return its local cache path."""
-    hf_path = _split_hf_path(path, min_parts=3)
-    if hf_path is None:
-        return None
-    repo_id, filename = hf_path
-
-    try:
-        from huggingface_hub import hf_hub_download
-
-        log_for_0(f"Downloading checkpoint file from HF: {repo_id}/{filename}")
-        return hf_hub_download(repo_id=repo_id, filename=filename, repo_type="model")
-    except Exception as e:
-        raise FileNotFoundError(f"HF checkpoint file not found: {path} ({e})") from e
 
 
 def _checkpoint_step(checkpoint_name: str) -> int:
@@ -152,10 +82,6 @@ def _checkpoint_step(checkpoint_name: str) -> int:
     match = re.search(r"(\d+)$", checkpoint_name)
     return int(match.group(1)) if match else -1
 
-
-# ============================================
-# Resume: list + load (local or HF)
-# ============================================
 
 def find_all_checkpoints(ckpt_dir: str, prefix: str = "checkpoint_"):
     """Find local checkpoint paths in a directory, sorted by step ascending."""
@@ -176,14 +102,11 @@ def find_latest_checkpoint(ckpt_dir: str, prefix: str = "checkpoint_"):
 
 
 def _download_hf_checkpoint(checkpoint_path: str) -> Optional[str]:
-    """Download an HF checkpoint snapshot and return the local checkpoint path."""
     hf_path = _split_hf_path(checkpoint_path, min_parts=2)
     if hf_path is None:
         return None
     repo_id, sub_path = hf_path
-
     from huggingface_hub import snapshot_download
-
     log_for_0(f"Downloading checkpoint from HF: {repo_id}" + (f"/{sub_path}" if sub_path else ""))
     local_dir = snapshot_download(
         repo_id=repo_id, repo_type="model",
@@ -192,68 +115,45 @@ def _download_hf_checkpoint(checkpoint_path: str) -> Optional[str]:
     return os.path.join(local_dir, sub_path) if sub_path else local_dir
 
 
-def _checkpoint_target(state_template: Any):
-    return {
-        "params": state_template.params,
-        "ema_params1": state_template.ema_params1,
-        "opt_state": state_template.opt_state,
-        "step": state_template.step,
-        "epoch": state_template.epoch,
-        "dropout_rng": state_template.dropout_rng,
-    }
+def _restore_checkpoint(checkpoint_path: str) -> Any:
+    """Restore a checkpoint from a local path or a HF repo id.
 
-
-def _restore_checkpoint(checkpoint_path: str, target: Any):
-    """Restore a checkpoint from a file or directory.
-
-    Tries (in order):
-      1. flax.serialization.from_bytes on a file (format written by save_checkpoint)
-      2. flax.training.checkpoints.restore_checkpoint for HF pre-trained checkpoints
-         that may have been saved with the old Flax msgpack / orbax format.
+    Accepts a file, a directory (loads the latest `checkpoint_*` inside), or a
+    Hugging Face repo id like `org/name` — the latter is downloaded into the
+    local HF cache (auth via `hf auth login` / HF_TOKEN) and then resolved the
+    same way as a local directory.
     """
     local = _local_path(checkpoint_path)
-
-    # Resolve directory → latest checkpoint file
+    if not os.path.exists(local):
+        # Not on disk — try treating it as a HF repo id and pull it down.
+        hf_dir = _download_hf_checkpoint(checkpoint_path)
+        if hf_dir is not None:
+            local = hf_dir
     resolved = local
     if os.path.isdir(local):
         latest = find_latest_checkpoint(local)
         if latest is not None and os.path.isfile(latest):
             resolved = latest
-
     if os.path.isfile(resolved):
-        try:
-            with open(resolved, "rb") as f:
-                data = f.read()
-            return serialization.from_bytes(target, data)
-        except Exception:
-            pass
-
-    # Fallback: old Flax/orbax format (e.g., HF pre-trained checkpoints saved before
-    # this change).
-    try:
-        from flax.training import checkpoints as _ckpts
-        return _ckpts.restore_checkpoint(local, target=target)
-    except Exception:
-        return None
+        return torch.load(resolved, map_location="cpu")
+    return None
 
 
 def _validate_checkpoint(ckpt: Any):
     if ckpt is None:
         raise ValueError("checkpoint restore returned None")
-    required_keys = ("params", "opt_state", "step", "epoch", "dropout_rng")
+    required_keys = ("params", "opt_state", "step", "epoch")
     missing_keys = [key for key in required_keys if key not in ckpt]
     if missing_keys:
         raise ValueError(f"checkpoint restore missing keys: {missing_keys}")
 
 
-def load_checkpoint(checkpoint_path: str, state_template: Any) -> Tuple[Any, int]:
+def load_checkpoint(checkpoint_path: str, state) -> Tuple[Any, int]:
     """Load an ELF checkpoint.
 
     Uses an existing local path first; otherwise tries HF and then local fallback.
     """
     log_for_0(f"Loading ELF checkpoint from {checkpoint_path}...")
-
-    target = _checkpoint_target(state_template)
     ckpt, loaded_from = None, None
     errors = []
 
@@ -261,7 +161,7 @@ def load_checkpoint(checkpoint_path: str, state_template: Any) -> Tuple[Any, int
     if os.path.exists(local_path):
         try:
             log_for_0(f"Loading local checkpoint from {local_path}...")
-            ckpt = _restore_checkpoint(local_path, target)
+            ckpt = _restore_checkpoint(local_path)
             _validate_checkpoint(ckpt)
             loaded_from = "local"
         except Exception as e:
@@ -272,38 +172,55 @@ def load_checkpoint(checkpoint_path: str, state_template: Any) -> Tuple[Any, int
             hf_path = _download_hf_checkpoint(checkpoint_path)
             if hf_path:
                 log_for_0(f"Loading HF checkpoint from {hf_path}...")
-                ckpt = _restore_checkpoint(hf_path, target)
+                ckpt = _restore_checkpoint(hf_path)
                 _validate_checkpoint(ckpt)
                 loaded_from = "HF"
         except Exception as e:
             errors.append(f"HF: {e}")
             log_for_0(f"HF checkpoint restore failed ({e}); falling back to local path.")
 
-    if ckpt is None and not os.path.exists(local_path):
-        try:
-            log_for_0(f"Loading local checkpoint from {local_path}...")
-            ckpt = _restore_checkpoint(local_path, target)
-            _validate_checkpoint(ckpt)
-            loaded_from = "local"
-        except Exception as e:
-            errors.append(f"local: {e}")
-
     if ckpt is None:
         raise ValueError(
-            f"Failed to load checkpoint from {checkpoint_path}. "
-            f"Tried: {'; '.join(errors)}"
+            f"Failed to load checkpoint from {checkpoint_path}. Tried: {'; '.join(errors)}"
         )
 
-    log_for_0(f"Loaded checkpoint keys: {ckpt.keys()}")
+    log_for_0(f"Loaded checkpoint keys: {list(ckpt.keys())}")
 
-    restored_state = state_template.replace(
-        params=jax.tree_util.tree_map(jnp.array, ckpt["params"]),
-        ema_params1=jax.tree_util.tree_map(jnp.array, ckpt.get("ema_params1", ckpt["params"])),
-        opt_state=ckpt["opt_state"],
-        step=ckpt["step"],
-        epoch=ckpt["epoch"],
-        dropout_rng=jnp.array(ckpt["dropout_rng"]),
-    )
-    step, epoch = int(ckpt["step"]), int(ckpt["epoch"])
-    log_for_0(f"Loaded {loaded_from} checkpoint from step {step} (epoch {epoch})")
-    return restored_state, step
+    inner_model = unwrap_model(state.model)
+    inner_model.load_state_dict(ckpt["params"])
+    ema_src = ckpt.get("ema_params1", ckpt["params"])
+    device_map = {n: p.device for n, p in inner_model.named_parameters()}
+    for n, b in inner_model.named_buffers():
+        device_map.setdefault(n, b.device)
+    fallback_device = next(iter(device_map.values()), torch.device("cpu"))
+    state.ema_params1 = {
+        n: t.to(device_map.get(n, fallback_device)) for n, t in ema_src.items()
+    }
+    state.optimizer.load_state_dict(ckpt["opt_state"])
+    if state.lr_scheduler is not None and ckpt.get("lr_scheduler") is not None:
+        state.lr_scheduler.load_state_dict(ckpt["lr_scheduler"])
+    state.step = int(ckpt["step"])
+    state.epoch = int(ckpt["epoch"])
+    if ckpt.get("dropout_rng") is not None and state.dropout_generator is not None:
+        try:
+            state.dropout_generator.set_state(ckpt["dropout_rng"])
+        except Exception:
+            pass
+    if ckpt.get("grad_accum_buffers"):
+        buffers = ckpt["grad_accum_buffers"]
+        state.grad_accum_buffers = {}
+        param_ids = []
+        for name, param in inner_model.named_parameters():
+            if not param.requires_grad:
+                continue
+            param_ids.append(id(param))
+            saved = buffers.get(name)
+            state.grad_accum_buffers[id(param)] = (
+                saved.to(device=param.device, dtype=param.dtype)
+                if saved is not None else torch.zeros_like(param)
+            )
+        state.grad_accum_param_ids = tuple(param_ids)
+
+    step = int(ckpt["step"])
+    log_for_0(f"Loaded {loaded_from} checkpoint from step {step} (epoch {state.epoch})")
+    return state, step

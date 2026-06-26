@@ -7,7 +7,6 @@ pad_token: eos
 
 # Encoder
 encoder_model_name: t5-small
-encoder_checkpoint: "embedded-language-flows/t5_small_encoder_jax/t5_small_encoder_jax.pkl"
 latent_mean: 0.0
 latent_std: 0.2
 
@@ -37,7 +36,7 @@ self_cond_prob: 0.5
 
 # Training (optimizer + schedule)
 epochs: 100
-global_batch_size: 512
+global_batch_size: 64
 blr: 0.001
 weight_decay: 0.0
 warmup_steps: 5000
@@ -47,7 +46,7 @@ optimizer: muon
 ema_decay1: 0.9999
 
 # Sampling
-sampling_configs_path: "configs/sampling_configs/cond_sampling_configs.yml"
+sampling_configs_path: "src/configs/sampling_configs/cond_sampling_configs.yml"
 num_samples: 100
 
 # Logging & Checkpointing

@@ -1,23 +1,24 @@
-from functools import partial
-
-import jax
-import jax.numpy as jnp
+import torch
+import numpy as np
 
 
-@partial(jax.jit, static_argnums=(2,))
+@torch.no_grad()
 def encode_text(
-    input_ids, attention_mask, encoder_apply_fn, encoder_params,
-    latent_mean, latent_std,
+    input_ids,
+    attention_mask,
+    encoder,
+    latent_mean,
+    latent_std,
+    use_bf16=True,
 ):
     """Encoder pass from text to latent with normalization."""
-    latents = encoder_apply_fn(
-        {"params": encoder_params}, input_ids=input_ids, attention_mask=attention_mask,
-        deterministic=True,
-    )
+    autocast_enabled = bool(use_bf16) and input_ids.is_cuda
+    with torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=autocast_enabled):
+        latents = encoder(input_ids=input_ids, attention_mask=attention_mask, deterministic=True)
     return (latents - latent_mean) / latent_std
 
 
-def build_self_attn_cond_masks(is_cond, is_valid, xp=jnp):
+def build_self_attn_cond_masks(is_cond, is_valid, xp=np):
     """Build self-attention conditioning masks from cond/valid token flags."""
     encoder_attention_mask = (
         (is_cond[:, :, None] & is_cond[:, None, :]) |
