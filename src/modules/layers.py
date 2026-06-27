@@ -221,6 +221,219 @@ class Attention(nn.Module):
         return x
 
 
+# ============================================================
+# Geometry-routed attention (curvature-aware operator mixing)
+# ============================================================
+
+def apply_attention_mask_to_logits(logits: torch.Tensor,
+                                   attention_mask: Optional[torch.Tensor]) -> torch.Tensor:
+    """Mask invalid key positions in attention logits.
+
+    logits: (B, H, N, N). attention_mask: (B, N) or (B, N, N), 1=valid.
+    Uses a large finite negative instead of -inf so a fully-masked row
+    softmaxes to uniform rather than NaN.
+    """
+    if attention_mask is None:
+        return logits
+    if attention_mask.dim() == 2:
+        key_mask = attention_mask[:, None, None, :]  # (B, 1, 1, N)
+    elif attention_mask.dim() == 3:
+        key_mask = attention_mask[:, None, :, :]  # (B, 1, N, N)
+    else:
+        key_mask = attention_mask
+    neg = torch.tensor(-1e4, dtype=logits.dtype, device=logits.device)
+    return torch.where(key_mask.bool(), logits, neg)
+
+
+def softmax_attention_from_logits(logits: torch.Tensor, v: torch.Tensor,
+                                  attention_mask: Optional[torch.Tensor] = None,
+                                  dropout_p: float = 0.0,
+                                  deterministic: bool = True) -> torch.Tensor:
+    """Softmax attention from explicit logits. logits: (B, H, N, N), v: (B, H, N, D)."""
+    probs = F.softmax(apply_attention_mask_to_logits(logits, attention_mask), dim=-1)
+    if dropout_p > 0.0 and not deterministic:
+        probs = F.dropout(probs, p=dropout_p, training=True)
+    return probs @ v
+
+
+def poincare_exp0(u: torch.Tensor, c: float = 1.0, eps: float = 1e-6) -> torch.Tensor:
+    """Exponential map at the origin of the Poincare ball with curvature -c.
+
+    u: (..., D) tangent vectors -> points inside the ball of radius 1/sqrt(c),
+    clamped to (1/sqrt(c)) * (1 - eps) for numerical safety.
+    """
+    sqrt_c = math.sqrt(c)
+    norm = u.norm(dim=-1, keepdim=True)
+    # tanh(sqrt(c) * n) / (sqrt(c) * n) -> 1 as n -> 0.
+    scaled = sqrt_c * norm
+    coef = torch.where(scaled > eps, torch.tanh(scaled) / scaled.clamp(min=eps),
+                       torch.ones_like(scaled))
+    x = coef * u
+    max_norm = (1.0 / sqrt_c) * (1.0 - eps)
+    x_norm = x.norm(dim=-1, keepdim=True).clamp(min=eps)
+    return torch.where(x_norm > max_norm, x * (max_norm / x_norm), x)
+
+
+def busemann_proxy_score(q: torch.Tensor, k: torch.Tensor, c: float = 1.0,
+                         eps: float = 1e-6) -> torch.Tensor:
+    """First-order Busemann/PV proxy attention logits, (B, H, N, D) -> (B, H, N, N).
+
+    Maps queries into the Poincare ball via exp0 and treats normalized keys as
+    ideal boundary directions p_j; the logit is the (negated) Busemann-style
+    function log(1 - c||q_i||^2) - log(||sqrt(c) q_i - p_j||^2). This is a
+    first-version proxy of PV/Busemann attention, replaceable later — it is
+    NOT claimed to be the exact PV operator.
+    """
+    qf, kf = q.float(), k.float()
+    sqrt_c = math.sqrt(c)
+    q_ball = poincare_exp0(qf, c=c, eps=eps)
+    p = F.normalize(kf, dim=-1, eps=eps)  # ideal boundary directions
+    q_norm2 = q_ball.pow(2).sum(dim=-1, keepdim=True)  # (B, H, N, 1)
+    # ||sqrt(c) q_i - p_j||^2 = c||q_i||^2 - 2 sqrt(c) <q_i, p_j> + 1
+    dot = torch.matmul(q_ball, p.transpose(-2, -1))  # (B, H, N, N)
+    denom = (c * q_norm2 - 2.0 * sqrt_c * dot + 1.0).clamp(min=eps)
+    score = torch.log((1.0 - c * q_norm2).clamp(min=eps)) - torch.log(denom)
+    return score.to(q.dtype)
+
+
+def poincare_distance_score(q: torch.Tensor, k: torch.Tensor, c: float = 1.0,
+                            eps: float = 1e-6) -> torch.Tensor:
+    """Negative squared Poincare distance logits, (B, H, N, D) -> (B, H, N, N)."""
+    qf, kf = q.float(), k.float()
+    head_dim = q.shape[-1]
+    q_ball = poincare_exp0(qf, c=c, eps=eps)
+    k_ball = poincare_exp0(kf, c=c, eps=eps)
+    q_norm2 = q_ball.pow(2).sum(dim=-1, keepdim=True)  # (B, H, N, 1)
+    k_norm2 = k_ball.pow(2).sum(dim=-1, keepdim=True).transpose(-2, -1)  # (B, H, 1, N)
+    # ||q_i - k_j||^2 expanded via the gram matrix.
+    diff2 = (q_norm2 + k_norm2
+             - 2.0 * torch.matmul(q_ball, k_ball.transpose(-2, -1))).clamp(min=0.0)
+    denom = ((1.0 - c * q_norm2) * (1.0 - c * k_norm2)).clamp(min=eps)
+    acosh_arg = (1.0 + 2.0 * c * diff2 / denom).clamp(min=1.0 + eps)
+    dist = torch.acosh(acosh_arg) / math.sqrt(c)
+    score = -dist.pow(2) / math.sqrt(head_dim)
+    return score.to(q.dtype)
+
+
+def sphere_score(q: torch.Tensor, k: torch.Tensor, mode: str = "cosine",
+                 eps: float = 1e-6) -> torch.Tensor:
+    """Spherical/angular attention logits, (B, H, N, D) -> (B, H, N, N)."""
+    head_dim = q.shape[-1]
+    q_s = F.normalize(q.float(), dim=-1, eps=eps)
+    k_s = F.normalize(k.float(), dim=-1, eps=eps)
+    dot = torch.matmul(q_s, k_s.transpose(-2, -1)).clamp(-1.0 + eps, 1.0 - eps)
+    if mode == "cosine":
+        score = dot / math.sqrt(head_dim)
+    elif mode == "negative_angular":
+        score = -torch.acos(dot).pow(2) / math.sqrt(head_dim)
+    else:
+        raise ValueError(f"Unknown sphere_score mode: {mode}")
+    return score.to(q.dtype)
+
+
+class GeometryRoutedAttention(nn.Module):
+    """Multi-head self-attention mixing Euclidean / hyperbolic / spherical operators.
+
+    Same qkv / q_norm / k_norm / proj structure (and initialization) as
+    Attention, so parameter shapes and names line up. Only the attention
+    logits differ per branch; values stay in R^d in all branches, so the
+    branch outputs live in the same Euclidean coordinates and can be mixed
+    directly by the router gates.
+    """
+
+    def __init__(self, dim: int, num_heads: int = 8, qkv_bias: bool = True,
+                 qk_norm: bool = True, attn_drop: float = 0.0, proj_drop: float = 0.0,
+                 geometry_router: Optional[nn.Module] = None,
+                 hyperbolic_curvature: float = 1.0,
+                 hyperbolic_score: str = "busemann_proxy",
+                 sphere_score: str = "cosine"):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.qk_norm = qk_norm
+        self.attn_drop = attn_drop
+        self.proj_drop = proj_drop
+        head_dim = dim // num_heads
+        self.qkv = _make_linear(dim, dim * 3, bias=qkv_bias)
+        self.q_norm = RMSNorm(head_dim) if qk_norm else nn.Identity()
+        self.k_norm = RMSNorm(head_dim) if qk_norm else nn.Identity()
+        self.proj = _make_linear(dim, dim, bias=True)
+
+        self.geometry_router = geometry_router
+        self.hyperbolic_curvature = hyperbolic_curvature
+        if hyperbolic_score not in ("busemann_proxy", "poincare_distance"):
+            raise ValueError(f"Unknown hyperbolic_score: {hyperbolic_score}")
+        self.hyperbolic_score = hyperbolic_score
+        if sphere_score not in ("cosine", "negative_angular"):
+            raise ValueError(f"Unknown sphere_score: {sphere_score}")
+        self.sphere_score_mode = sphere_score
+
+    def forward(self, x: torch.Tensor, rope_fn: Optional[nn.Module],
+                attention_mask: Optional[torch.Tensor] = None,
+                deterministic: bool = True,
+                t: Optional[torch.Tensor] = None,
+                geometry_mask: Optional[torch.Tensor] = None,
+                routing_active: bool = True,
+                router_row_active: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """x: (B, N, C). attention_mask: optional (B, N), 1=valid. t: (B,).
+
+        routing_active=False bypasses routing for the whole call (original
+        SDPA path). router_row_active: optional (B,) with 1=routed row,
+        0=row forced to the pure Euclidean gate (used by denoiser-only mode
+        for decoder-mode rows in the mixed training forward).
+        """
+        B, N, C = x.shape
+        head_dim = self.dim // self.num_heads
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        if self.qk_norm:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+        if rope_fn is not None:
+            q = rope_fn(q)
+            k = rope_fn(k)
+
+        if self.geometry_router is None or not routing_active:
+            # Fallback: behave like the original Attention.
+            out = scaled_dot_product_attention(q, k, v, attn_mask=attention_mask)
+        else:
+            if t is None:
+                raise ValueError(
+                    "GeometryRoutedAttention requires the diffusion time t; "
+                    "ELFBlock should pass it through."
+                )
+            eps = self.geometry_router.eps
+            logits_e = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(head_dim)
+            if self.hyperbolic_score == "busemann_proxy":
+                logits_h = busemann_proxy_score(q, k, c=self.hyperbolic_curvature, eps=eps)
+            else:
+                logits_h = poincare_distance_score(q, k, c=self.hyperbolic_curvature, eps=eps)
+            logits_s = sphere_score(q, k, mode=self.sphere_score_mode, eps=eps)
+
+            out_e = softmax_attention_from_logits(
+                logits_e, v, attention_mask, self.attn_drop, deterministic)
+            out_h = softmax_attention_from_logits(
+                logits_h, v, attention_mask, self.attn_drop, deterministic)
+            out_s = softmax_attention_from_logits(
+                logits_s, v, attention_mask, self.attn_drop, deterministic)
+
+            gates, _ = self.geometry_router(x, t, geometry_mask)  # (B, 3)
+            if router_row_active is not None:
+                # Rows flagged inactive get the pure Euclidean gate [1, 0, 0].
+                euclid = torch.zeros_like(gates)
+                euclid[:, 0] = 1.0
+                act = router_row_active.to(gates.dtype).view(-1, 1)
+                gates = act * gates + (1.0 - act) * euclid
+            g = gates.to(out_e.dtype).view(B, 3, 1, 1, 1)
+            out = g[:, 0] * out_e + g[:, 1] * out_h + g[:, 2] * out_s
+
+        out = out.permute(0, 2, 1, 3).reshape(B, N, C)
+        out = self.proj(out)
+        if self.proj_drop > 0.0:
+            out = F.dropout(out, p=self.proj_drop, training=not deterministic)
+        return out
+
+
 class SwiGLUFFN(nn.Module):
     """SwiGLU Feed-Forward Network."""
 

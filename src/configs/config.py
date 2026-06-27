@@ -94,11 +94,51 @@ class Config:
     # EMA
     ema_decay1: float = 0.9999
 
+    # Geometry router (curvature-aware attention routing). All defaults keep
+    # the feature OFF; the disabled model matches the original architecture
+    # and state_dict exactly.
+    geometry_router_enabled: bool = False
+    geometry_router_layers: str = "all"  # "all", "0,1,2", or "0-3,6,8-11"
+    geometry_router_mode: str = "soft"  # "soft" only; "hard" reserved (NotImplementedError)
+    geometry_router_on_attention: bool = True  # v1 requires True (validated)
+    geometry_router_on_mlp: bool = False  # reserved; v1 requires False (validated)
+    # False (default): routing applies to every forward through the shared
+    # Transformer backbone, including decoder/CE-mode rows and the decode
+    # path. True: strict denoiser semantics — decoder-mode rows are forced to
+    # the pure Euclidean gate and decode-mode forwards bypass routing
+    # entirely; only denoiser (L2) forwards are routed.
+    geometry_router_denoiser_only: bool = False
+    geometry_router_detach_scores: bool = True  # geometry stats under no_grad
+    geometry_router_sample_size: int = 32  # tokens subsampled per example for stats
+    geometry_router_quad_samples: int = 512  # deterministic quadruples for delta_rel
+    geometry_router_eps: float = 1e-6
+    geometry_router_tau_h: float = 4.0  # sharpness of hyperbolic score -> logit
+    geometry_router_tau_s: float = 4.0  # sharpness of sphere score -> logit
+    geometry_router_bias_e: float = 2.0  # strong initial Euclidean prior
+    geometry_router_bias_h: float = -2.0
+    geometry_router_bias_s: float = -2.0
+    geometry_router_learnable_bias: bool = False  # If true, learn per-layer E/H/S routing priors.
+    geometry_router_time_e_bias: float = 1.0  # l_E += time_e_bias * (1 - t)
+    geometry_router_time_h_bias: float = 0.0  # l_H += time_h_bias * t
+    geometry_router_time_s_bias: float = 0.0  # l_S += time_s_bias * t
+    geometry_router_sphere_k: str = "0.25,0.5,1.0,2.0,4.0"  # positive curvature candidates (distances diameter-normalized first)
+    geometry_hyperbolic_curvature: float = 1.0
+    geometry_hyperbolic_score: str = "busemann_proxy"  # "busemann_proxy" or "poincare_distance"
+    geometry_sphere_score: str = "cosine"  # "cosine" or "negative_angular"
+    geometry_router_log_metrics: bool = False
+    geometry_router_log_freq: int = 100
+    # Gate warmup: for the first N optimizer steps, blend the learned gates
+    # toward uniform [1/3,1/3,1/3] (linearly decaying 1->0) so the
+    # hyperbolic/sphere branches are forced to train early. 0 = off.
+    geometry_router_gate_warmup_steps: int = 0
+    geometry_router_metrics_path: str = None  # Optional JSON path for eval/train router summaries.
+
     # Sampling
     sampling_configs_path: str = None
     # Sampling configs sweep (list of SamplingConfig objects, loaded from YAML)
     sampling_configs: list = [SamplingConfig()]
     num_samples: int = 100
+    eval_data_offset: int = 0  # Skip this many eval examples for conditional generation.
 
     # PPL Evaluation
     online_eval: bool = True  # Enable PPL evaluation for generated samples
@@ -110,6 +150,7 @@ class Config:
     log_freq: int = 100
     eval_freq: int = 10
     save_freq: float = 100  # Can be fractional (e.g., 0.1 for saving every 0.1 epoch)
+    max_train_steps: int = None  # Optional optimizer-step cap for short finetunes.
 
     # Output
     output_dir: str = "./output_dir"

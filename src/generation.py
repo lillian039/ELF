@@ -18,6 +18,7 @@ from utils.data_utils import get_dataloader, get_pad_token_id
 from utils.encoder_utils import encode_text
 from utils.metrics_utils import Metrics as PPLMetrics, compute_bleu, compute_rouge
 from utils.sampling_utils import get_sampling_steps
+from utils.router_metrics import write_geometry_router_metrics
 from utils.generation_utils import (
     mask_after_eos, shift_left,
     _generate_samples_single_batch, _dlm_decode_batch,
@@ -307,8 +308,24 @@ def test_generation_cond(
     pad_token_id = get_pad_token_id(tokenizer, config.pad_token)
     eos_token_id = tokenizer.eos_token_id
 
+    eval_data_offset = int(getattr(config, "eval_data_offset", 0) or 0)
+    if eval_data_offset < 0:
+        raise ValueError("eval_data_offset must be non-negative")
+    if eval_data_offset:
+        if eval_data_offset >= len(dataset):
+            raise ValueError(
+                f"eval_data_offset={eval_data_offset} is outside eval dataset of size {len(dataset)}")
+        log_for_0(f"Conditional eval offset: starting at dataset index {eval_data_offset}")
+    if eval_data_offset:
+        if hasattr(dataset, "select"):
+            eval_dataset = dataset.select(range(eval_data_offset, len(dataset)))
+        else:
+            eval_dataset = dataset[eval_data_offset:]
+    else:
+        eval_dataset = dataset
+
     dataloader = get_dataloader(
-        dataset, batch_size=batch_size,
+        eval_dataset, batch_size=batch_size,
         shuffle=False, num_workers=0, drop_last=False,
         max_seq_length=config.max_length, pad_token_id=pad_token_id,
         max_input_seq_length=config.max_input_length, distributed=False,
@@ -386,7 +403,8 @@ def test_generation_cond(
                 if samples_processed >= num_samples:
                     break
                 text = tokenizer.decode(predicted_ids[i].detach().cpu().numpy(), skip_special_tokens=True)
-                all_generated.append((samples_processed, original_texts[i], text, context_texts[i]))
+                sample_id = eval_data_offset + samples_processed
+                all_generated.append((sample_id, original_texts[i], text, context_texts[i]))
                 samples_processed += 1
             pbar.update(1)
         pbar.close()
@@ -439,6 +457,17 @@ def test_generation_cond(
                 with open(os.path.join(config.output_dir, name, "metrics.jsonl"), "a", encoding="utf-8") as f:
                     f.write(json.dumps(metrics_line, ensure_ascii=False) + "\n")
                 upload_output_dir_to_hf(config.output_dir, config.hf_repo_id, reason="generation metrics")
+            if bool(getattr(config, "geometry_router_log_metrics", False)):
+                metrics_path = getattr(config, "geometry_router_metrics_path", None)
+                if not metrics_path:
+                    metrics_path = os.path.join(
+                        config.output_dir, name,
+                        f"geometry_router_metrics_{epoch_val}_{step_val}.json",
+                    )
+                write_geometry_router_metrics(
+                    model, metrics_path,
+                    extra={"epoch": epoch_val, "step": step_val, "sampling_config": name},
+                )
 
     if _rank() == 0 and config.use_wandb and wandb_tables and wandb is not None:
         try:

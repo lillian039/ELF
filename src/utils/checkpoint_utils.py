@@ -176,7 +176,11 @@ def load_checkpoint(checkpoint_path: str, state) -> Tuple[Any, int]:
     log_for_0(f"Loaded checkpoint keys: {list(ckpt.keys())}")
 
     inner_model = unwrap_model(state.model)
-    inner_model.load_state_dict(ckpt["params"])
+    missing, unexpected = inner_model.load_state_dict(ckpt["params"], strict=False)
+    if missing:
+        log_for_0(f"Checkpoint load: initialized missing model keys from current model: {missing}")
+    if unexpected:
+        log_for_0(f"Checkpoint load: ignored unexpected checkpoint keys: {unexpected}")
     ema_src = ckpt.get("ema_params1", ckpt["params"])
     device_map = {n: p.device for n, p in inner_model.named_parameters()}
     for n, b in inner_model.named_buffers():
@@ -185,7 +189,14 @@ def load_checkpoint(checkpoint_path: str, state) -> Tuple[Any, int]:
     state.ema_params1 = {
         n: t.to(device_map.get(n, fallback_device)) for n, t in ema_src.items()
     }
-    state.optimizer.load_state_dict(ckpt["opt_state"])
+    try:
+        state.optimizer.load_state_dict(ckpt["opt_state"])
+    except ValueError as e:
+        log_for_0(
+            f"Optimizer state is incompatible with current parameters ({e}); "
+            "continuing with freshly initialized optimizer state.",
+            level=logging.WARNING,
+        )
     if state.lr_scheduler is not None and ckpt.get("lr_scheduler") is not None:
         state.lr_scheduler.load_state_dict(ckpt["lr_scheduler"])
     state.step = int(ckpt["step"])

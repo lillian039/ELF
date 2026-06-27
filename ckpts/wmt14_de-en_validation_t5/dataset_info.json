@@ -1,0 +1,101 @@
+{
+  "builder_name": "parquet",
+  "citation": "",
+  "config_name": "de-en",
+  "dataset_name": "wmt14",
+  "dataset_size": 1359920533,
+  "description": "",
+  "download_checksums": {
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/train-00000-of-00003.parquet": {
+      "num_bytes": 279527247,
+      "checksum": null
+    },
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/train-00001-of-00003.parquet": {
+      "num_bytes": 264970514,
+      "checksum": null
+    },
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/train-00002-of-00003.parquet": {
+      "num_bytes": 272987200,
+      "checksum": null
+    },
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/validation-00000-of-00001.parquet": {
+      "num_bytes": 473798,
+      "checksum": null
+    },
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/test-00000-of-00001.parquet": {
+      "num_bytes": 508753,
+      "checksum": null
+    }
+  },
+  "download_size": 818467512,
+  "features": {
+    "input": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "target": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "index": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "condition_input_ids": {
+      "feature": {
+        "dtype": "int64",
+        "_type": "Value"
+      },
+      "_type": "List"
+    },
+    "condition_sequence_length": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "input_ids": {
+      "feature": {
+        "dtype": "int32",
+        "_type": "Value"
+      },
+      "_type": "List"
+    },
+    "sequence_length": {
+      "dtype": "int64",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 2178388045,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 1358406800,
+      "num_examples": 4508785,
+      "shard_lengths": [
+        1521929,
+        1721928,
+        1264928
+      ],
+      "dataset_name": "wmt14"
+    },
+    "validation": {
+      "name": "validation",
+      "num_bytes": 736407,
+      "num_examples": 3000,
+      "dataset_name": "wmt14"
+    },
+    "test": {
+      "name": "test",
+      "num_bytes": 777326,
+      "num_examples": 3003,
+      "dataset_name": "wmt14"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}

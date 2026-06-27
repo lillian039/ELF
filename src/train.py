@@ -27,10 +27,14 @@ from utils.checkpoint_utils import (
 )
 from utils.train_utils import (
     TrainState, prefetch_to_device, get_optimizer, create_learning_rate_fn,
-    attach_lr_scheduler,
+    attach_lr_scheduler, unwrap_model,
 )
+from utils.router_metrics import write_geometry_router_metrics
 from generation import run_generation
 from configs.config import load_config_from_yaml, apply_config_overrides, load_sampling_configs, SamplingConfig
+from modules.geometry_router import (
+    geometry_model_kwargs, validate_geometry_router_config, set_gate_warmup_alpha,
+)
 from modules.model import ELF_models
 from utils.data_utils import get_dataloader, prepare_batch, load_dataset, get_pad_token_id
 from train_step import train_step
@@ -152,6 +156,24 @@ def run_training(config, *, force_cpu: bool = False):
     except TypeError:
         vocab_size = tokenizer.vocab_size
     log_for_0(f"Tokenizer vocab: CE head={vocab_size}")
+    geometry_router_enabled = bool(getattr(config, "geometry_router_enabled", False))
+    gate_warmup_steps = int(getattr(config, "geometry_router_gate_warmup_steps", 0))
+    validate_geometry_router_config(config)  # rejects reserved/unimplemented options
+    if geometry_router_enabled:
+        log_for_0(
+            "Geometry router: enabled | "
+            f"layers={getattr(config, 'geometry_router_layers', 'all')}, "
+            f"denoiser_only={bool(getattr(config, 'geometry_router_denoiser_only', False))}, "
+            f"learnable_bias={bool(getattr(config, 'geometry_router_learnable_bias', False))}, "
+            f"gate_warmup_steps={gate_warmup_steps}, "
+            f"hyperbolic_score={getattr(config, 'geometry_hyperbolic_score', 'busemann_proxy')}, "
+            f"sphere_score={getattr(config, 'geometry_sphere_score', 'cosine')}, "
+            f"sphere_k={getattr(config, 'geometry_router_sphere_k', '0.25,0.5,1.0,2.0,4.0')}, "
+            f"sample_size={getattr(config, 'geometry_router_sample_size', 32)}, "
+            f"quad_samples={getattr(config, 'geometry_router_quad_samples', 512)}"
+        )
+    else:
+        log_for_0("Geometry router: disabled")
     model = ELF_models[config.model](
         text_encoder_dim=encoder_config.d_model, max_length=config.max_length,
         attn_drop=config.attn_dropout, proj_drop=config.proj_dropout,
@@ -161,6 +183,7 @@ def run_training(config, *, force_cpu: bool = False):
         num_model_mode_tokens=config.num_model_mode_tokens,
         bottleneck_dim=config.bottleneck_dim,
         gradient_checkpointing=bool(getattr(config, "gradient_checkpointing", True)),
+        **geometry_model_kwargs(config),
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -323,8 +346,15 @@ def run_training(config, *, force_cpu: bool = False):
     # Track last save point for fractional save_freq; use fractional epoch from
     # checkpoint to avoid re-saving immediately after resume.
     last_save_epoch = resume_epoch_fractional if resume_step > 0 else float(start_epoch)
+    stop_training = False
+    max_train_steps = getattr(config, "max_train_steps", None)
 
-    for epoch in range(start_epoch, config.epochs):
+    end_epoch = config.epochs
+    if max_train_steps is not None and int(max_train_steps) > global_step:
+        extra_epochs = (int(max_train_steps) - global_step + steps_per_epoch - 1) // steps_per_epoch
+        end_epoch = max(end_epoch, start_epoch + max(1, extra_epochs))
+
+    for epoch in range(start_epoch, end_epoch):
         log_for_0(f"\nEpoch {epoch + 1}/{config.epochs}")
 
         # Free device buffers from previous epoch before allocating new ones, to avoid
@@ -355,6 +385,11 @@ def run_training(config, *, force_cpu: bool = False):
             if epoch == start_epoch and step_in_epoch < steps_to_skip_in_epoch:
                 continue
             batch = prepare_batch(batch, config, generator=g)
+            # Gate warmup schedule: linearly decay alpha 1->0 over the first
+            # gate_warmup_steps, forcing the geometry branches to train early.
+            if geometry_router_enabled and gate_warmup_steps > 0:
+                alpha = max(0.0, 1.0 - global_step / gate_warmup_steps)
+                set_gate_warmup_alpha(unwrap_model(state.model), alpha)
             state, metrics = train_step(state, encoder=encoder, batch=batch, config=config)
 
             # Sync only on first step to measure torch.compile time;
@@ -421,7 +456,14 @@ def run_training(config, *, force_cpu: bool = False):
                     log_for_0(f"Saved checkpoint at epoch {progress:.2f} (step {global_step})")
                     last_save_epoch = progress
 
+            if max_train_steps is not None and global_step >= int(max_train_steps):
+                log_for_0(f"Reached max_train_steps={max_train_steps}; stopping training loop")
+                stop_training = True
+                break
+
         epoch_pbar.close()
+        if stop_training:
+            break
         current_epoch = epoch + 1
         state.epoch = current_epoch
 
@@ -443,6 +485,14 @@ def run_training(config, *, force_cpu: bool = False):
     log_for_0("=" * 60)
     save_checkpoint(state, config.output_dir, global_step, hf_repo_id=config.hf_repo_id)
     log_for_0(f"Final checkpoint saved to {config.output_dir}")
+    if bool(getattr(config, "geometry_router_log_metrics", False)):
+        metrics_path = getattr(config, "geometry_router_metrics_path", None)
+        if not metrics_path:
+            metrics_path = os.path.join(config.output_dir, "geometry_router_metrics_train.json")
+        write_geometry_router_metrics(
+            state.model, metrics_path,
+            extra={"step": int(global_step), "epoch": float(state.epoch)},
+        )
     if config.use_wandb and rank == 0 and wandb is not None:
         wandb.finish()
 

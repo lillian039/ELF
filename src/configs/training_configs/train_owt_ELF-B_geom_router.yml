@@ -1,0 +1,93 @@
+# Copy of train_owt_ELF-B.yml with the geometry router enabled.
+# Dataset
+data_path: "embedded-language-flows/openwebtext-t5"
+max_length: 1024
+
+# Encoder
+encoder_model_name: t5-small
+latent_mean: 0.0
+latent_std: 0.2
+
+# Model architecture
+model: ELF-B  # ELF-B, ELF-M
+bottleneck_dim: 128
+num_time_tokens: 4
+num_self_cond_cfg_tokens: 4
+num_model_mode_tokens: 4
+
+# Geometry router (curvature-aware attention routing)
+geometry_router_enabled: true
+geometry_router_layers: "all"
+geometry_router_mode: "soft"
+geometry_router_on_attention: true
+geometry_router_on_mlp: false
+# false: route every forward through the shared backbone (incl. decoder/CE
+# rows and the decode path). true: strict denoiser semantics — decoder rows
+# forced to the Euclidean gate, decode-mode forwards bypass routing.
+geometry_router_denoiser_only: false
+geometry_router_detach_scores: true
+geometry_router_sample_size: 32
+geometry_router_quad_samples: 512
+geometry_router_tau_h: 4.0
+geometry_router_tau_s: 4.0
+geometry_router_bias_e: 2.0
+geometry_router_bias_h: -2.0
+geometry_router_bias_s: -2.0
+geometry_router_time_e_bias: 1.0
+geometry_router_time_h_bias: 0.0
+geometry_router_time_s_bias: 0.0
+geometry_router_sphere_k: "0.25,0.5,1.0,2.0,4.0"
+geometry_hyperbolic_curvature: 1.0
+geometry_hyperbolic_score: "busemann_proxy"
+geometry_sphere_score: "cosine"
+
+# Denoiser objective
+denoiser_p_mean: -1.5
+denoiser_p_std: 0.8
+denoiser_noise_scale: 2.0
+t_eps: 0.05
+time_schedule: "logit_normal"
+
+# Decoder objective
+decoder_prob: 0.2
+decoder_noise_scale: 5.0
+decoder_p_mean: 0.8
+decoder_p_std: 0.8
+
+# Conditioning / CFG
+self_cond_prob: 0.5
+
+# Training (optimizer + schedule)
+epochs: 5
+global_batch_size: 512
+blr: 0.001
+weight_decay: 0.0
+warmup_epochs: 0.5
+warmup_steps: -1  # -1 falls back to warmup_epochs
+optimizer: muon  # "adamw" or "muon"
+
+# EMA
+ema_decay1: 0.9999
+
+# Sampling
+sampling_configs_path: "src/configs/sampling_configs/uncond_sampling_configs.yml"
+num_samples: 1000
+
+# Logging & Checkpointing
+log_freq: 100
+save_freq: 1
+eval_freq: 1
+
+# Output
+output_dir: "outputs/elf_b-owt-geom-router"
+hf_repo_id: null
+resume: null
+
+# Wandb
+use_wandb: true
+wandb_project: elf
+wandb_entity: null
+wandb_run_name: elf_b-owt-geom-router
+
+# Misc
+seed: 42

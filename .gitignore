@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Resumable-download temp files
+*.dl
+
+# Large model checkpoints (>100MB, exceed GitHub's file limit).
+# Hosted via GitHub Release assets and on HuggingFace
+# (embedded-language-flows/ELF-B-de-en-torch, ELF-B-xsum-torch) instead.
+ckpts/ELF-B-de-en-torch/
+ckpts/ELF-B-xsum-torch/
+
+# From-scratch pilot training checkpoints (large; keep eval metrics only)
+outputs/scratch_deen_base/
+outputs/scratch_deen_geom/

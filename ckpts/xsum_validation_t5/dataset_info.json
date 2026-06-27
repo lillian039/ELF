@@ -1,0 +1,88 @@
+{
+  "builder_name": "parquet",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "xsum",
+  "dataset_size": 532255381,
+  "description": "",
+  "download_checksums": {
+    "hf://datasets/EdinburghNLP/xsum@7d4d486c2f8ef850b1a11aead99b894ff3dd7da9/data/train-00000-of-00001.parquet": {
+      "num_bytes": 299612457,
+      "checksum": null
+    },
+    "hf://datasets/EdinburghNLP/xsum@7d4d486c2f8ef850b1a11aead99b894ff3dd7da9/data/validation-00000-of-00001.parquet": {
+      "num_bytes": 16447668,
+      "checksum": null
+    },
+    "hf://datasets/EdinburghNLP/xsum@7d4d486c2f8ef850b1a11aead99b894ff3dd7da9/data/test-00000-of-00001.parquet": {
+      "num_bytes": 16731226,
+      "checksum": null
+    }
+  },
+  "download_size": 332791351,
+  "features": {
+    "input": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "target": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "index": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "condition_input_ids": {
+      "feature": {
+        "dtype": "int64",
+        "_type": "Value"
+      },
+      "_type": "List"
+    },
+    "condition_sequence_length": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "input_ids": {
+      "feature": {
+        "dtype": "int32",
+        "_type": "Value"
+      },
+      "_type": "List"
+    },
+    "sequence_length": {
+      "dtype": "int64",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 865046732,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 479206363,
+      "num_examples": 204045,
+      "dataset_name": "xsum"
+    },
+    "validation": {
+      "name": "validation",
+      "num_bytes": 26292877,
+      "num_examples": 11332,
+      "dataset_name": "xsum"
+    },
+    "test": {
+      "name": "test",
+      "num_bytes": 26756141,
+      "num_examples": 11334,
+      "dataset_name": "xsum"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}

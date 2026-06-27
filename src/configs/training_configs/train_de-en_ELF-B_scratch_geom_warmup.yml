@@ -1,0 +1,94 @@
+# From-scratch De-En, ARM B (treatment): geometry router ON.
+# Identical to arm A (train_de-en_ELF-B_scratch_base.yml) except the router
+# fields. 10-epoch pilot; raise `epochs` and relaunch to extend (auto-resume).
+# Dataset (local copies; see download_train_data.sh)
+data_path: "ckpts/wmt14_de-en_train_t5"
+eval_data_path: "ckpts/wmt14_de-en_validation_t5"
+max_length: 128
+max_input_length: 64
+pad_token: eos
+
+# Encoder
+encoder_model_name: t5-small
+latent_mean: 0.0
+latent_std: 0.2
+
+# Model architecture
+model: ELF-B
+bottleneck_dim: 128
+num_time_tokens: 4
+num_self_cond_cfg_tokens: 4
+num_model_mode_tokens: 4
+
+# Denoiser objective
+denoiser_p_mean: -1.5
+denoiser_p_std: 0.8
+denoiser_noise_scale: 2.0
+t_eps: 0.05
+time_schedule: "logit_normal"
+
+# Decoder objective
+decoder_prob: 0.2
+decoder_noise_scale: 1.0
+decoder_p_mean: 0.8
+decoder_p_std: 0.8
+
+# Conditioning / CFG
+label_drop_prob: 0.1
+self_cond_prob: 0.5
+
+# Training (optimizer + schedule)
+epochs: 15
+global_batch_size: 512
+blr: 0.001
+weight_decay: 0.0
+warmup_steps: 5000
+optimizer: muon
+gradient_checkpointing: true
+use_bf16: true
+
+# EMA
+ema_decay1: 0.9999
+
+# Sampling (in-training generation eval kept cheap; full eval via eval.py)
+sampling_configs_path: "src/configs/sampling_configs/cond_sampling_configs.yml"
+num_samples: 256
+
+# Logging & Checkpointing
+log_freq: 100
+save_freq: 1
+eval_freq: 5
+
+# Output
+output_dir: "outputs/scratch_deen_geom_warmup"
+hf_repo_id: null
+resume: null
+
+# Wandb
+use_wandb: false
+wandb_project: elf
+wandb_entity: null
+wandb_run_name: scratch_deen_geom_warmup
+
+# Misc
+seed: 0
+
+# Geometry router (ARM B only)
+geometry_router_enabled: true
+geometry_router_layers: "all"
+geometry_router_denoiser_only: true   # decoder/CE rows stay Euclidean
+geometry_router_learnable_bias: true  # per-layer E/H/S priors are trained
+geometry_router_detach_scores: true
+geometry_router_log_metrics: true
+geometry_router_sample_size: 16
+geometry_router_quad_samples: 128
+geometry_router_tau_h: 4.0
+geometry_router_tau_s: 4.0
+geometry_router_bias_e: 2.0
+geometry_router_bias_h: -2.0
+geometry_router_bias_s: -2.0
+geometry_router_time_e_bias: 1.0
+geometry_router_sphere_k: "0.5,2.0"
+geometry_hyperbolic_score: "busemann_proxy"
+geometry_sphere_score: "cosine"
+geometry_router_gate_warmup_steps: 44030  # 5 epochs of forced-uniform gate warmup, then learned

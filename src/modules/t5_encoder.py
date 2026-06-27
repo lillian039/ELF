@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 """Frozen T5 text embedder, wrapping `transformers.T5EncoderModel`."""
 
+import inspect
 from typing import Any, Optional
 
 import torch
 import torch.nn as nn
+from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
 
 from utils.logging_utils import log_for_0
 
@@ -63,6 +65,95 @@ class T5Encoder(nn.Module):
         config.is_gated_act = bool(getattr(hf, "is_gated_act", False))
         self.config = config
 
+    def _encode_with_pairwise_mask(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> BaseModelOutputWithPastAndCrossAttentions:
+        """Run the T5 encoder with an ELF pairwise self-attention mask.
+
+        ELF builds a 3D mask so condition tokens cannot attend to target tokens
+        during latent encoding. Recent transformers versions expand T5 encoder
+        masks as if every mask were 2D, which turns a 3D mask into an invalid
+        5D tensor. This path mirrors the encoder stack forward pass but supplies
+        the intended 4D additive mask directly to each T5 block.
+        """
+        encoder = self.model.encoder
+        input_shape = input_ids.size()
+        input_ids = input_ids.view(-1, input_shape[-1])
+        inputs_embeds = encoder.embed_tokens(input_ids)
+
+        batch_size, seq_length = input_shape
+        if attention_mask.shape != (batch_size, seq_length, seq_length):
+            raise ValueError(
+                "Pairwise T5 attention mask must have shape "
+                f"{(batch_size, seq_length, seq_length)}, got {tuple(attention_mask.shape)}."
+            )
+
+        causal_mask = attention_mask[:, None, :, :].to(dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+        causal_mask = (1.0 - causal_mask) * torch.finfo(inputs_embeds.dtype).min
+        cache_position = torch.arange(seq_length, device=inputs_embeds.device)
+
+        output_attentions = bool(encoder.config.output_attentions)
+        output_hidden_states = bool(encoder.config.output_hidden_states)
+        return_dict = bool(encoder.config.use_return_dict)
+
+        head_mask = encoder.get_head_mask(None, encoder.config.num_layers)
+        all_hidden_states = () if output_hidden_states else None
+        all_attentions = () if output_attentions else None
+        position_bias = None
+
+        hidden_states = encoder.dropout(inputs_embeds)
+        for i, layer_module in enumerate(encoder.block):
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states,)
+
+            # T5Block.forward changed across transformers versions
+            # (past_key_value -> past_key_values, cache_position added);
+            # build kwargs from the actual signature so both APIs work.
+            block_params = inspect.signature(layer_module.forward).parameters
+            layer_kwargs = dict(
+                layer_head_mask=head_mask[i],
+                use_cache=False,
+                output_attentions=output_attentions,
+                return_dict=return_dict,
+            )
+            if "past_key_values" in block_params:
+                layer_kwargs["past_key_values"] = None
+            elif "past_key_value" in block_params:
+                layer_kwargs["past_key_value"] = None
+            if "cache_position" in block_params:
+                layer_kwargs["cache_position"] = cache_position
+            layer_outputs = layer_module(
+                hidden_states,
+                causal_mask,
+                position_bias,
+                **layer_kwargs,
+            )
+            hidden_states = layer_outputs[0]
+            position_bias = layer_outputs[1]
+
+            if output_attentions:
+                all_attentions = all_attentions + (layer_outputs[2],)
+
+        hidden_states = encoder.final_layer_norm(hidden_states)
+        hidden_states = encoder.dropout(hidden_states)
+
+        if output_hidden_states:
+            all_hidden_states = all_hidden_states + (hidden_states,)
+
+        if not return_dict:
+            values = [hidden_states, None, all_hidden_states, all_attentions, None]
+            return tuple(v for v in values if v is not None)
+
+        return BaseModelOutputWithPastAndCrossAttentions(
+            last_hidden_state=hidden_states,
+            past_key_values=None,
+            hidden_states=all_hidden_states,
+            attentions=all_attentions,
+            cross_attentions=None,
+        )
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -73,7 +164,17 @@ class T5Encoder(nn.Module):
         if deterministic:
             self.model.eval()
         try:
-            out = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            if attention_mask is not None and attention_mask.ndim == 3:
+                # Older transformers (e.g. 4.44) expand 3D masks correctly via
+                # get_extended_attention_mask; prefer the stock path and only
+                # fall back to the manual stack walk on versions where the 3D
+                # mask is mis-expanded (raises a shape/dim error).
+                try:
+                    out = self.model(input_ids=input_ids, attention_mask=attention_mask)
+                except (ValueError, RuntimeError, IndexError):
+                    out = self._encode_with_pairwise_mask(input_ids=input_ids, attention_mask=attention_mask)
+            else:
+                out = self.model(input_ids=input_ids, attention_mask=attention_mask)
         finally:
             if not deterministic and was_training:
                 self.model.train()
