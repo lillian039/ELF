@@ -1,16 +1,13 @@
 % ---------------------------------------------------------------------------
-% Semantic-Manifold Factorization of Embedding Flows (SM-ELF)
-% Method + experiments draft. M1 (mean-pool residual flow) and M2 (low-rank
-% manifold code + cycle + IB) are both implemented and trained; the Experiments
-% section reports the actual TinyStories results, including the key (negative)
-% disentanglement finding and the in-progress code-dimension sweep.
-% Self-contained; compiles with pdflatex.
+% Attribute Superposition in Low-Rank Semantic Conditioning of Embedding Flows.
+% Analysis paper: the low-rank "semantic manifold" code is a NEGATIVE result;
+% the contribution is the directly-measured superposition mechanism and the
+% failed decorrelation fix. Self-contained; compiles with pdflatex.
 % ---------------------------------------------------------------------------
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{bm}
-\usepackage{xcolor}
 
 \newcommand{\R}{\mathbb{R}}
 \newcommand{\E}{\mathbb{E}}
@@ -20,13 +17,9 @@
 \newcommand{\eps}{\bm{\epsilon}}
 \newcommand{\phib}{\bm{\phi}}
 \newcommand{\cb}{\bm{c}}
-\newcommand{\manifold}{\mathcal{M}}
-% M1 = mean-pool residual flow (baseline); M2 = low-rank manifold code + cycle + IB.
-% Both are implemented and trained; these tags are kept empty (no impl/planned split).
-\newcommand{\impl}{}
-\newcommand{\plan}{}
 
-\title{\vspace{-3em}Semantic-Manifold Factorization of Embedding Flows}
+\title{\vspace{-3em}Attribute Superposition in Low-Rank Semantic Conditioning\\
+of Embedding-Space Language Flows}
 \author{}
 \date{}
 
@@ -34,179 +27,166 @@
 \maketitle
 \vspace{-3em}
 
+\begin{abstract}
+Continuous, embedding-space language models such as ELF generate text by denoising
+an entire sequence of frozen encoder embeddings. We ask what happens when their
+conditioning is routed through an explicit, low-rank \emph{semantic code}: we factor
+the embedding as $\xb=\phib(s)+\rb$ and flow the residual $\rb$ conditioned on a
+learned code $\phib(s)=U\cb$, $\cb\in\R^{k}$. The intuition motivating such
+``semantic manifold'' codes is that a compact bottleneck yields cleaner, more
+disentangled control. We find the opposite. A low-rank code is no more controllable
+than full-rank mean-pool conditioning, and on a decontaminated disentanglement test
+it is \emph{more} entangled. We trace the cause to attribute \emph{superposition}:
+applying a Manifold Probe to the code space, the measured superposition rises
+strictly monotonically as $k$ shrinks (five seeds, six code sizes) and tracks
+off-target leakage ($r{=}0.90$). The obvious remedy---decorrelating the code
+axes---lowers the code-space cosine but \emph{increases} generation leakage and
+destabilizes training, indicating the entanglement is intrinsic to low-rank
+conditioning under correlated attributes rather than an artifact of readout
+geometry. Our results connect controllable generation to representational
+superposition and caution against compact semantic bottlenecks as a disentanglement
+device.
+\end{abstract}
+
 % ===========================================================================
-\section{Motivation}
+\section{Introduction}
 % ===========================================================================
 
-ELF~\cite{elf2026} models text as a continuous flow in the token-embedding space
-of a frozen encoder $E$: a full-attention Transformer denoises an entire
-embedding sequence $\xb \in \R^{L\times d}$ from Gaussian noise to clean
-embeddings, discretizing to tokens only at $t{=}1$ via a shared decoder head.
-Global sentence structure is \emph{already} present in ELF---every position
-attends to every other at every step---but only \emph{implicitly}, distributed
-across attention and never exposed as a manipulable object.
+ELF~\cite{elf2026} models text as a continuous flow in the token-embedding space of
+a frozen encoder $E$: a full-attention Transformer denoises an entire embedding
+sequence $\xb\in\R^{L\times d}$ from Gaussian noise to clean embeddings,
+discretizing to tokens only at $t{=}1$ via a shared decoder head. Global sentence
+structure is \emph{already} present---every position attends to every other at every
+step---but only implicitly, distributed across attention and never exposed as a
+manipulable object.
 
-We factor that structure out into an explicit, sentence-level semantic code
-$\phib(s)$, and let the flow model only the \emph{residual} $\rb=\xb-\phib(s)$
-conditioned on $\phib(s)$. The design is not ``global vs.\ per-token'' denoising
-(ELF is already global), but the introduction of an \emph{explicit, conditioning}
-semantic variable whose dimensionality and geometry we can control and probe.
+A natural idea, and the one we study, is to factor that structure into an explicit,
+sentence-level \emph{semantic code} $\phib(s)$ and flow only the residual
+$\rb=\xb-\phib(s)$ conditioned on it. Making $\phib(s)=U\cb$ a learned low-rank code
+$\cb\in\R^{k}$ turns the conditioning variable's dimensionality and geometry into
+knobs we can set and probe. The motivating intuition---shared with much of the
+disentanglement literature---is that squeezing conditioning through a compact
+``semantic manifold'' should concentrate reusable global structure and yield cleaner,
+more separable control.
 
-\paragraph{Contributions.} (i) \textbf{SM-ELF}, a semantic-manifold-factorized
-embedding flow: residual flow conditioned on a learned low-rank code, with a
-cycle-consistency loss that makes steering a trained property
-(\S\ref{sec:method}). (ii) An empirical finding that runs against the intuition
-motivating low-rank ``semantic manifold'' codes: such a code does \emph{not} make
-generation more controllable or more disentangled than full-rank conditioning;
-on a decontaminated disentanglement test it is in fact \emph{worse}
-(\S\ref{sec:exp}). (iii) A mechanism---attribute \emph{superposition} induced by
-the bottleneck---established both behaviorally (a monotonic code-dimension sweep)
-and \emph{directly}, by applying the Manifold Probe of \cite{manifold2026} to the
-code space: the measured superposition grows strictly monotonically as the code
-shrinks (5 seeds, all six code sizes---the study's most robust trend) and predicts
-the multi-seed off-target leakage at Pearson $r{=}0.90$, tying controllable
-generation to the superposition phenomenon. (iv) Evidence the entanglement is
-\emph{intrinsic} rather than a readout artifact: the natural decorrelation fix
-lowers the code-axis cosine yet \emph{increases} generation leakage and
-destabilizes training, so any remedy must act on the generation pathway, not
-code-space geometry.
+We test this intuition on TinyStories and it does not hold. The low-rank code is no
+more controllable than full-rank mean-pool conditioning, and once we decontaminate
+the steering axis of correlated attributes it disentangles \emph{worse}. Rather than
+stop at a negative result, we ask \emph{why}, and find a concrete mechanism:
+correlated attributes are forced into \emph{superposition} in the code, which we
+measure directly with the Manifold Probe of \cite{manifold2026}.
+
+\paragraph{Contributions.}
+(i) A controlled study of conditioning geometry in an embedding-space language flow,
+varying the code dimension $k$ from $8$ to $512$ under matched budget
+(\S\ref{sec:method}--\ref{sec:exp}).
+(ii) The negative finding: a low-rank semantic code does not improve controllability
+or disentanglement over full-rank conditioning, and is measurably more entangled on
+a decontaminated test (\S\ref{sec:leak}).
+(iii) The mechanism, measured directly: applying the Manifold Probe to the code
+space, attribute superposition grows strictly monotonically as $k$ shrinks (five
+seeds, six code sizes---the study's most robust trend) and tracks the multi-seed
+off-target leakage at $r{=}0.90$ (\S\ref{sec:superpos}).
+(iv) Evidence the entanglement is \emph{intrinsic}: the obvious decorrelation fix
+lowers the code-axis cosine yet increases generation leakage and destabilizes
+training, so any remedy must act on the generation pathway, not code geometry
+(\S\ref{sec:mitig}).
+
+% ===========================================================================
+\section{Related work}
+% ===========================================================================
+
+\paragraph{Continuous / embedding-space language models.} Diffusion and flow language
+models generate in a continuous latent rather than autoregressively over tokens:
+Diffusion-LM~\cite{diffusionlm} denoises word-embedding sequences, and
+ELF~\cite{elf2026} flows in a frozen encoder's embedding space with a shared decoder
+head. We take ELF as our backbone and study how an added conditioning variable
+behaves, not the generative quality of the backbone itself.
+
+\paragraph{Controllable generation.} Steering generation toward attributes has been
+approached by plug-and-play gradients on a classifier~\cite{pplm} and, more recently,
+by moving along linear directions in a model's representation space. Our steering
+protocol (fit an attribute axis, move along it) is standard; our focus is the
+\emph{geometry} of the conditioning code that such steering acts on.
+
+\paragraph{Disentanglement.} A large line of work seeks factorized latents, e.g.\
+$\beta$-VAE~\cite{betavae}. Locatello et al.~\cite{locatello} showed that
+\emph{unsupervised} disentanglement is unidentifiable without inductive biases or
+supervision. We differ in setting and claim: we work in \emph{supervised,
+conditional generation}, and rather than seek identifiability we identify and
+directly measure a specific geometric failure mode---superposition induced by a
+low-rank conditioning bottleneck under correlated attributes.
+
+\paragraph{Superposition and mechanistic interpretability.} Neural representations
+can place more features than dimensions by encoding them as non-orthogonal
+directions~\cite{elhage}. The Manifold Probe~\cite{manifold2026} generalizes linear
+probing to recover the feature subspace and encoding directions of a concept. We
+apply it to a generative model's conditioning code and relate the recovered
+superposition to a behavioral quantity (off-target leakage).
 
 % ===========================================================================
 \section{Method}
 \label{sec:method}
 % ===========================================================================
 
-\subsection{Semantic / residual factorization \impl}
-
-Let $\xb = E(s) \in \R^{L\times d}$ be the frozen, normalized encoder embeddings
-of a sentence $s$, and let $\bm{m}\in\{0,1\}^{L}$ mask the valid
-(non-padding, non-conditioning) positions. In the current model the semantic
-code is the masked mean of the clean latent,
+\paragraph{Semantic / residual factorization.} Let $\xb=E(s)\in\R^{L\times d}$ be the
+frozen, normalized encoder embeddings of a sentence $s$ and $\bm m\in\{0,1\}^{L}$ mask
+the valid positions. We split the embedding additively into a sentence-level code
+$\phib(s)$ (broadcast over $L$) and a residual, and---unlike ELF, which models
+$p(\xb)$---model the conditional residual $p(\rb\mid\phib(s))$:
 \begin{equation}
-  \phib(s) \;=\; \frac{\sum_{i} m_i\,\xb_i}{\sum_i m_i}\;\in\;\R^{d},
-  \label{eq:phi}
+  \xb=\phib(s)+\rb,\qquad \rb=\xb-\phib(s).
+  \label{eq:split}
 \end{equation}
-and the embeddings are split additively (with $\phib(s)$ broadcast over $L$),
-\begin{equation}
-  \xb \;=\; \phib(s) + \rb,
-  \qquad
-  \rb \;=\; \xb - \phib(s).
-\end{equation}
-Unlike ELF, which models $p(\xb)$, we model the conditional residual
-$p(\rb \mid \phib(s))$.
+The full-rank baseline (M1) sets $\phib(s)$ to the masked mean of the clean latent,
+$\phib(s)=\big(\sum_i m_i\xb_i\big)/\sum_i m_i\in\R^{d}$.
 
-\paragraph{Honest reading.} In M1, $\phib(s)$ is the full-dimensional mean, a
-deterministic summary of $\xb$; the residual $\rb$ therefore still carries most
-lexical and positional information. M1 only establishes the residual-flow
-machinery and a no-harm baseline. The semantic-control properties require the
-low-rank bottleneck of \S\ref{sec:m2}.
-
-\subsection{Conditional flow on the residual \impl}
-
-We keep ELF's flow-matching convention, interpolating with a fixed noise scale
-$\sigma$ (\texttt{denoiser\_noise\_scale}),
+\paragraph{Conditional flow.} Keeping ELF's flow-matching convention with noise scale
+$\sigma$, $\zb_t=t\,\rb+(1-t)\sigma\eps$, $\eps\sim\mathcal N(0,I)$, we flow the
+\emph{residual}: the network predicts $\hat\rb$, giving velocity
+$\hat{\bm v}=(\hat\rb-\zb_t)/(1-t)$, and $\phib(s)$ is injected as $P{=}4$ learnable
+conditioning prefix tokens ($\phib{=}\bm 0$ gives the classifier-free-guidance
+branch). The denoiser loss is masked velocity regression,
 \begin{equation}
-  \zb_t \;=\; t\,\rb + (1-t)\,\sigma\,\eps,
-  \qquad \eps\sim\mathcal{N}(0,I),
-\end{equation}
-but flow the \emph{residual} rather than the raw embedding. The network is an
-$\xb$-predictor in residual space: it outputs $\hat\rb$, from which the velocity
-is $\hat{\bm{v}} = (\hat\rb-\zb_t)/(1-t)$. The semantic code is injected as
-$P$ learnable conditioning prefix tokens $\,(\texttt{num\_phi\_tokens})$,
-$\phib(s)$ projected $d\!\to\!d_{\text{hid}}$ and added to each slot---mirroring
-ELF's time tokens. Setting $\phib\!=\!\bm 0$ yields the unconditional branch for
-classifier-free guidance. The denoiser loss is velocity regression on the
-residual,
-\begin{equation}
-  \mathcal{L}_{\mathrm{fm}}
-  = \E_{s,t,\eps}\!\left[\, \bm{m}\odot
-      \big\| \bm{v}_\theta(\zb_t,\phib(s),t) - (\rb - \zb_t)/(1-t) \big\|^2
-    \right].
+  \mathcal L_{\mathrm{fm}}=\E_{s,t,\eps}\Big[\bm m\odot
+  \big\|\bm v_\theta(\zb_t,\phib(s),t)-(\rb-\zb_t)/(1-t)\big\|^2\Big].
   \label{eq:fm}
 \end{equation}
+Because tokenization needs the full embedding, ELF's shared decoder head operates on
+$\xb$ (reconstructed as $\hat\xb=\phib+\hat\rb$ at $t{=}1$) under the usual
+cross-entropy $\mathcal L_{\mathrm{ce}}$; the baseline objective is
+$\mathcal L_{\text{M1}}=(1-p_{\text{dec}})\mathcal L_{\mathrm{fm}}
++p_{\text{dec}}\mathcal L_{\mathrm{ce}}$.
 
-\paragraph{Decoder branch.} ELF's shared decoder head maps a latent to token
-logits at $t{=}1$. Because tokenization needs the \emph{full} embedding, this
-branch operates on $\xb$ (not $\rb$), conditioned on the same $\phib(s)$, and is
-trained with the existing cross-entropy objective $\mathcal{L}_{\mathrm{ce}}$.
-The M1 objective is thus ELF's two-branch loss with the denoiser branch moved to
-residual space:
+\paragraph{Low-rank code (M2).} The object of study replaces the mean with a learned
+low-rank code, $\cb=g_\theta(\mathrm{pool}(\xb))\in\R^{k}$, lifted by a bias-free
+$U\in\R^{d\times k}$ to $\phib(s)=U\cb$. Here $g_\theta$ is an MLP
+($\mathrm{GELU}$ hidden layer $d\!\to\!256$, then linear heads for
+$\bm\mu,\log\bm\sigma^2\in\R^{k}$); the forward pass uses $\cb=\bm\mu$. Setting
+$k{=}d$, $U{=}I$, $g_\theta{=}\mathrm{pool}$ recovers M1. Two auxiliary terms shape
+the code: a semantic-consistency (cycle) loss that re-probes the reconstruction and
+matches its code to the conditioning code,
 \begin{equation}
-  \mathcal{L}_{\text{M1}}
-  = (1-p_{\text{dec}})\,\mathcal{L}_{\mathrm{fm}}
-  + p_{\text{dec}}\,\mathcal{L}_{\mathrm{ce}}.
-\end{equation}
-
-\subsection{Sampling \impl}
-
-Generation runs the residual flow from noise to $\hat\rb$ (ODE/SDE samplers,
-optional self-conditioning and CFG), conditioned on a supplied code
-$\phib$. The clean embedding is reconstructed before discretization,
-\begin{equation}
-  \hat\xb \;=\; \phib + \hat\rb,
-\end{equation}
-and $\hat\xb$ is fed to the decoder head at $t{=}1$ to emit tokens. At test time
-$\phib$ is drawn from a bank of codes \eqref{eq:phi} computed on held-out
-sentences; fixing $\phib$ and resampling $\eps$ probes whether the code carries
-semantics (\S\ref{sec:exp}).
-
-% ===========================================================================
-\subsection{Low-rank manifold, cycle loss, information bottleneck}
-\label{sec:m2}
-% ===========================================================================
-
-M2 replaces the mean \eqref{eq:phi} with a low-rank \emph{manifold} code \impl
-produced by a small encoder $g_\theta$ and lifted by $U$,
-\begin{equation}
-  \cb = g_\theta\big(\mathrm{pool}(\xb)\big)\in\R^{k},\;\; k\ll d,
-  \qquad \phib(s)=U\cb,
-\end{equation}
-whose $k$-dimensional bottleneck forces $\phib$ to encode only reusable global
-structure.
-
-\paragraph{Architecture.} $\mathrm{pool}$ is the masked mean \eqref{eq:phi};
-$g_\theta$ is an MLP on it---a $\mathrm{GELU}$ hidden layer $d\!\to\!256$ followed
-by two linear heads producing $\bm\mu,\log\bm\sigma^2\in\R^{k}$---and the lift
-$U\in\R^{d\times k}$ is a bias-free linear map. The forward pass uses the
-deterministic code $\cb=\bm\mu$; $\log\bm\sigma^2$ feeds only the IB term. The
-conditioning prefix is $P{=}4$ learnable tokens, each a learned embedding plus a
-linear projection of $\phib(s)$ to the hidden width; dropping $\phib$ to $\bm 0$
-gives the CFG-unconditional branch. Setting $k{=}d$ with $U{=}I$ and
-$g_\theta{=}\mathrm{pool}$ recovers the mean-pool baseline (M1). The residual target uses a stop-gradient lift,
-$\rb = \xb - \mathrm{sg}[U\cb]$, so $g_\theta,U$ are trained through the
-conditioning, cycle, and IB paths rather than by making their own regression
-target easier. A semantic-consistency (cycle) loss \impl re-probes the
-reconstruction and matches its code to the conditioning code,
-\begin{equation}
-  \hat\cb = g_\theta\big(\mathrm{pool}(\hat\xb)\big),
-  \qquad
-  \mathcal{L}_{\mathrm{cyc}} = \E\big[\|\hat\cb-\mathrm{sg}[\cb]\|^2\big],
+  \mathcal L_{\mathrm{cyc}}=\E\big[\|g_\theta(\mathrm{pool}(\hat\xb))-\mathrm{sg}[\cb]\|^2\big],
   \label{eq:cyc}
 \end{equation}
-turning steering into a trained property: a generation conditioned on a perturbed
-code $\cb+\alpha\bm u$ is optimized to realize it, so moving along a manifold axis
-is causally faithful by construction. An information bottleneck \impl
-$\mathcal{L}_{\mathrm{ib}}=\beta\,\mathrm{KL}\!\big(q(\cb\mid s)\,\|\,
-\mathcal{N}(0,I)\big)$ guards against collapse (the flow ignoring $\phib$, or
-$\phib$ memorizing $\xb$). Full objective:
-\begin{equation}
-  \mathcal{L} = \mathcal{L}_{\text{M1}}
-  + \lambda_{\mathrm{cyc}}\mathcal{L}_{\mathrm{cyc}}
-  + \mathcal{L}_{\mathrm{ib}}.
-\end{equation}
-\emph{Implementation note.} The current scaffold uses a deterministic code
-$\cb=\bm\mu$ in the forward pass (the IB KL still regularizes
-$\bm\mu,\log\bm\sigma^2$); a sampled code $\cb=\bm\mu+\bm\sigma\odot\bm\epsilon$
-is a one-line upgrade. For unconditional sampling, a small prior $p_\psi(\cb)$
-over the $k$-dimensional code is trained post-hoc and sampled before the residual
-flow.
+so the trained model is optimized to realize a perturbed conditioning code; and an
+information bottleneck $\mathcal L_{\mathrm{ib}}=\beta\,\mathrm{KL}(q(\cb\mid s)\,\|\,
+\mathcal N(0,I))$ that guards against collapse. The residual target uses a
+stop-gradient lift $\rb=\xb-\mathrm{sg}[U\cb]$, so $g_\theta,U$ are trained through
+the conditioning, cycle, and IB paths. The full objective is
+$\mathcal L=\mathcal L_{\text{M1}}+\lambda_{\mathrm{cyc}}\mathcal L_{\mathrm{cyc}}
++\mathcal L_{\mathrm{ib}}$.
 
-\paragraph{Steering (C2).} Given a labeled attribute, we fit an axis $\bm u$ in
-code space (difference-of-means or a linear probe), then generate from
-$\cb_0+\alpha\bm u$ across a sweep of $\alpha$, lifting $\phib=U(\cb_0+\alpha\bm u)$
-and running the residual flow. Monotonic movement of a held-out classifier's
-attribute vs.\ $\alpha$ is the controllability result; the cycle loss is what
-makes that movement faithful rather than incidental.
+\paragraph{Steering and leakage.} Given a labeled attribute we fit an axis $\bm u$ in
+code space (difference of class means), then generate from $\cb_0+\alpha\bm u$ across a
+sweep of $\alpha$, lifting $\phib=U(\cb_0+\alpha\bm u)$. Because attributes are
+correlated in the data, a raw axis is contaminated; for the disentanglement test we
+decontaminate the sentiment axis by projecting out the gender direction,
+$\bm u_\perp=\bm u_{\text{sent}}-(\bm u_{\text{sent}}^{\!\top}\hat{\bm u}_{\text{gen}})
+\hat{\bm u}_{\text{gen}}$, and steer $\bm u_\perp$. On-target \emph{control} is the
+change in the target-attribute fraction across $\alpha$; off-target \emph{leakage} is
+the change in a held-out attribute that should stay fixed.
 
 % ===========================================================================
 \section{Experiments}
@@ -214,47 +194,30 @@ makes that movement faithful rather than incidental.
 % ===========================================================================
 
 \subsection{Setup}
+We use a 50k-story subset of TinyStories~\cite{tinystories} with a frozen T5-small
+encoder ($d{=}512$) and the ELF-B backbone ($\approx$105M parameters). Every model is
+trained for 60 epochs at effective global batch 80 with AdamW under identical
+hyperparameters apart from the code, on RTX-3090 GPUs. Each code size $k$ is an
+\emph{independent} model (the lift $U$ and code MLP change shape with $k$, so weights
+cannot be shared); M1 is the full-rank mean-pool reference. Sentiment and
+protagonist-gender labels come from small dependency-free lexicons applied to the
+original stories. For leakage we report two metrics: a saturating \emph{fraction
+range} (max$-$min of a binary attribute fraction over $\alpha$), and a non-saturating
+\emph{logit-shift} from a held-out linear gender classifier (difference-of-means in
+the frozen embedding space, trained on real stories and applied to generations),
+plus an AUC between the steering extremes. Unless noted, leakage numbers are averaged
+over five evaluation seeds (bootstrapped axis/classifier and resampled generation
+noise).
 
-\paragraph{Data and models.} We use a 50k-story subset of
-TinyStories~\cite{tinystories} with a frozen T5-small encoder ($d{=}512$) and the
-ELF-B backbone ($\approx$105M parameters). All models are trained for 60 epochs at
-global batch 80 with AdamW (Muon is unavailable on our CUDA driver) on
-5$\times$RTX-3090, under identical hyperparameters apart from the code. We compare
-\textbf{Conditional-ELF} (full-rank mean-pool $\phib\in\R^{512}$, no
-bottleneck/cycle; M1) and \textbf{SM-ELF} (learned code $\cb\in\R^{k}$, $k{=}64$,
-with cycle + IB; M2). Generation reconstructs $\hat\xb=\phib+\hat\rb$ before the
-decoder head.
-
-\paragraph{Attributes and axes.} Sentiment and protagonist-gender labels are
-obtained from small dependency-free lexicons applied to the original stories. An
-attribute axis is the difference of class means of the \emph{codes} $\cb$ of
-labeled examples, $\bm u=\overline{\cb}^{+}-\overline{\cb}^{-}$ (in the $d$-dim
-$\phib$ space for M1). For the disentanglement test we decontaminate the
-sentiment axis by projecting out the gender direction,
-$\bm u_{\perp}=\bm u_{\text{sent}}-(\bm u_{\text{sent}}^{\!\top}\hat{\bm u}_{\text{gen}})\,\hat{\bm u}_{\text{gen}}$,
-and steer $\bm u_{\perp}$.
-
-\paragraph{Metrics.} \emph{(C1, code is used / no collapse):} \textbf{fidelity}
-$=\cos(\mathrm{pool}(\hat\xb),\phib)$ between a generation's re-probed code and its
-conditioning code; \textbf{within-/across-code} similarity of generations sharing
-vs.\ differing in $\cb$; \textbf{distinct-2} lexical diversity at fixed $\cb$.
-\emph{(C2, control):} the held-out positive-sentiment fraction as a function of
-the steering scale $\alpha$. \emph{(Disentanglement):} \textbf{off-target
-leakage}, the range (max$-$min over the $\alpha$ sweep) of an off-target
-attribute's fraction; lower means steering the on-target attribute perturbs the
-off-target one less.
-
-\subsection{Results}
-
-\paragraph{Both models are controllable, and indistinguishably so.}
-The factorization is healthy and used: at a fixed code, resampling noise yields
-semantically consistent yet lexically diverse stories, and the generations'
-re-probed code matches the conditioning code (Table~\ref{tab:c1}). Steering the
-sentiment axis flips the held-out positive-sentiment fraction monotonically from
-$0$ to $1$ for \emph{both} models, with generations remaining coherent at the
-extremes. On these metrics SM-ELF and Conditional-ELF are statistically
-indistinguishable---the low-rank manifold and cycle loss confer no measurable
-advantage for single-factor control.
+\subsection{The code is used, and control is at parity}
+The factorization is healthy: at a fixed code, resampling noise yields semantically
+consistent yet lexically diverse stories, and a generation's re-probed code matches
+its conditioning code (Table~\ref{tab:c1}). Steering the sentiment axis flips the
+held-out positive-sentiment fraction monotonically from $0$ to $1$ for \emph{both} the
+low-rank and full-rank models, with coherent generations at the extremes. On these
+controllability metrics SM-ELF and full-rank Conditional-ELF are indistinguishable:
+the low-rank manifold and cycle loss confer no measurable advantage for single-factor
+control.
 
 \begin{table}[h]\centering\small
 \begin{tabular}{lcccc}
@@ -263,107 +226,36 @@ advantage for single-factor control.
 Conditional-ELF ($d{=}512$) & 0.962 & 0.967 & 0.918 & 0.755 \\
 SM-ELF ($k{=}64$)           & 0.961 & 0.967 & 0.931 & 0.787 \\
 \end{tabular}
-\caption{C1 (fixed-code resampling). Both pass: code respected, no collapse.}
+\caption{Fixed-code resampling. Both pass: the conditioning code is respected
+(fidelity, within- vs.\ across-code similarity) with no collapse (distinct-2).}
 \label{tab:c1}
 \end{table}
 
-\paragraph{The low-rank code \emph{harms} disentanglement.}
-Because attributes are correlated in the data (positive stories skew female
-protagonist, negative skew male), the difference-of-means sentiment axis is
-contaminated by gender: steering sentiment drags the protagonist's gender
-\emph{entirely} (off-target female fraction swings over the full $[0,1]$ range)
-for both models. The models separate, however, once we project the gender
-direction out of the sentiment axis and steer the orthogonalized axis: the
-\emph{model's own} code geometry then determines how much gender still leaks
-(Table~\ref{tab:leak}). The full-rank conditioning isolates the attributes
-better (gender leakage $0.33$) than the low-rank code ($0.88$). Compressing the
-conditioning into $k{=}64$ dimensions does not disentangle---it forces correlated
-attributes into \emph{superposition}, reducing their linear separability. (These
-are single-seed values; the robust multi-seed leakage with error bars and a
-non-saturating metric, which tempers the exact numbers but keeps the conclusion,
-is in Table~\ref{tab:leakrobust}.)
+\subsection{The low-rank code harms disentanglement}
+\label{sec:leak}
+Sentiment and gender are correlated in the data (positive stories skew female
+protagonist), so a raw sentiment axis drags gender entirely for every model. The
+models separate only once we steer the \emph{decontaminated} axis (gender projected
+out): the model's own code geometry then sets how much gender still leaks. A
+single-seed behavioral read already shows the low-rank code leaking more, but that
+statistic saturates at its $[0,1]$ ceiling and is run-to-run noisy, so we rely on the
+five-seed, non-saturating measurement (Table~\ref{tab:leakrobust}).
 
-\begin{table}[h]\centering\small
-\begin{tabular}{lcc}
-off-target leakage (range over $\alpha$) & raw axis & orthogonalized axis \\
-\hline
-Conditional-ELF ($d{=}512$) & 1.00 & \textbf{0.33} \\
-SM-ELF ($k{=}64$)           & 1.00 & 0.88 \\
-\end{tabular}
-\caption{Gender leakage while steering sentiment (lower = better disentanglement).
-On-target sentiment control is $0\!\to\!1$ in all cases. The low-rank code leaks
-\emph{more} once the axis is decontaminated.}
-\label{tab:leak}
-\end{table}
-
-\paragraph{Mechanism: a code-dimension sweep.}
-If bottleneck-induced superposition is the cause, orthogonalized leakage should
-grow \emph{monotonically} as $k$ shrinks. We test this by training the
-\emph{same} learned-code architecture from scratch across a wide range,
-$k\in\{8,16,64,256,512\}$ (each $k$ is an independent model---the lift
-$U\in\R^{d\times k}$ and the code MLP change shape with $k$, so weights cannot be
-shared---trained under identical hyperparameters and budget, the only variable
-being $k$), with the mean-pool model (M1) as a separate no-bottleneck reference.
-
-As a single-seed behavioral read this trend appears (Table~\ref{tab:ksweep}): at
-the matched 60-epoch budget leakage falls $1.00\,(k{=}16)>0.88\,(k{=}64)
->0.75\,(k{=}256)$ toward the mean-pool reference's $0.33$. We caution
-immediately, however, that this is a \emph{single run} of a \emph{saturating}
-statistic, and (next paragraph) it does not survive intact: the fraction range
-hits its $[0,1]$ ceiling for small $k$, and run-to-run variance is large enough
-that the exact values---and the strict step-by-step ordering---are unreliable
-(e.g.\ a single-seed $k{=}8$ run gave $0.67$, below $k{=}16$). What is robust is
-the \emph{endpoint gap} and the trend in the mean, which we establish next with
-error bars and a non-saturating metric, and confirm mechanistically by directly
-measuring superposition.
-
-\begin{table}[h]\centering\small
-\begin{tabular}{l ccccc c}
- & \multicolumn{5}{c}{learned code, dim $k$} & mean-pool \\
-\cline{2-6}
-$k$ & 8 & 16 & 64 & 256 & 512 & M1 ($d{=}512$) \\
-\hline
-leakage @ epoch 30 & 1.00 & 1.00 & --- & 0.67 & 0.58 & 0.33 \\
-leakage @ epoch 60 & (run) & 1.00 & 0.88 & 0.75 & (run) & 0.33 \\
-\end{tabular}
-\caption{Code-dimension sweep: orthogonalized gender leakage (range of off-target
-female fraction over the $\alpha$ sweep; lower = better disentanglement) vs.\ code
-size $k$. Each learned-$k$ model is trained from scratch under identical budget;
-M1 ($d{=}512$ mean-pool, no bottleneck/cycle/IB) is the no-bottleneck reference.
-The epoch-30 row is complete and monotone non-increasing in $k$
-($1.00,1.00,0.67,0.58$ for $k{=}8,16,256,512$ vs.\ $0.33$ for M1); the matched
-60-epoch row confirms it ($1.00\!>\!0.88\!>\!0.75\!>\!0.33$). \textbf{Single seed
-and saturating}---superseded by the multi-seed, non-saturating
-Table~\ref{tab:leakrobust}; shown as the initial behavioral observation only.
-``(run)''/``---'' mark values not yet available at submission time of this row.}
-\label{tab:ksweep}
-\end{table}
-
-\paragraph{Robustness: error bars, a non-saturating metric, and two honest caveats.}
-The sweep above is one steering run of a statistic that saturates at $1.0$. We
-re-measure leakage properly: a held-out \emph{continuous} gender classifier
-(difference-of-means in the frozen embedding space, trained on real stories and
-applied to generations) yields a non-saturating \emph{logit-shift} and an
-\emph{AUC} between the steering extremes, and we report five evaluation seeds
-(bootstrapped axis/classifier, resampled generation noise) for error bars
-(Table~\ref{tab:leakrobust}). The robust picture is more nuanced than the single
-run, and the nuances are informative. (i) The mean logit-shift \emph{decreases} as
-the code grows over the learned bottleneck range
+The robust picture is nuanced but consistent. The mean gender logit-shift
+\emph{decreases} as the code grows across the learned bottleneck range
 $k{=}8\!\to\!16\!\to\!64\!\to\!256$ ($1.31\!>\!0.97\!>\!0.76\!>\!0.45$), and the
-endpoints are cleanly separated from the mean-pool floor ($k{=}16$:
-$0.97\!\pm\!0.15$ vs.\ M1: $0.37\!\pm\!0.06$); adjacent $k$ overlap at five eval
-seeds, so we claim the trend and the endpoint gap, not strict step-by-step
-separation---tightening the middle needs \emph{model-level} seeds (each $k$
-retrained), the main remaining rigor gap. (ii) \textbf{Capacity collapse at
-$k{=}8$:} on-target sentiment control, $1.0$ at every larger $k$, drops to
-$0.63\!\pm\!0.06$ at $k{=}8$---the extreme bottleneck can no longer even represent
-the steered attribute, so leakage and control fail together. (iii)
-\textbf{Parametrization offset at $k{=}d$:} the learned $k{=}512$ code leaks
-$0.81\!\pm\!0.29$, far above the mean-pool M1's $0.37$ at equal dimension and out
-of line with the dimensionality trend, even though its measured superposition is
-correctly low (next paragraph). The learned conditioning stack (MLP $+$ lift $+$
-cycle $+$ IB) thus introduces entanglement of its own, beyond the dimensional
-effect and beyond what the linear probe sees.
+endpoint is cleanly separated from the mean-pool floor ($k{=}16$: $0.97\!\pm\!0.15$
+vs.\ M1: $0.37\!\pm\!0.06$); adjacent $k$ overlap at five evaluation seeds, so we
+claim the trend and the endpoint gap rather than strict step-by-step separation, and
+flag model-level seeds as the main remaining rigor gap. Two departures from a pure
+dimensionality story are informative. \emph{Capacity collapse at $k{=}8$:} on-target
+control, $1.0$ at every larger $k$, drops to $0.63\!\pm\!0.06$---the extreme bottleneck
+can no longer represent the steered attribute, so leakage and control fail together.
+\emph{Parametrization offset at $k{=}d$:} the learned $k{=}512$ code leaks
+$0.81\!\pm\!0.29$, far above the mean-pool M1's $0.37$ at equal dimension, even though
+its measured superposition is correctly low (\S\ref{sec:superpos})---the learned
+conditioning stack introduces some entanglement of its own, beyond the dimensional
+effect.
 
 \begin{table}[h]\centering\small
 \begin{tabular}{l cccccc}
@@ -371,56 +263,50 @@ code dim $k$ & 8 & 16 & 64 & 256 & 512 (learned) & 512 (M1) \\
 \hline
 gender logit-shift (non-sat.) & $1.31\!\pm\!.25$ & $0.97\!\pm\!.15$ & $0.76\!\pm\!.30$ & $0.45\!\pm\!.12$ & $0.81\!\pm\!.29$ & $0.37\!\pm\!.06$ \\
 gender AUC (extremes)         & $0.87$ & $0.99$ & $0.77$ & $0.74$ & $0.88$ & $0.76$ \\
-frac.\ range (old, sat.)      & $0.59\!\pm\!.24$ & $0.98\!\pm\!.04$ & $0.92\!\pm\!.10$ & $0.79\!\pm\!.17$ & $0.54\!\pm\!.25$ & $0.76\!\pm\!.22$ \\
+frac.\ range (saturating)     & $0.59\!\pm\!.24$ & $0.98\!\pm\!.04$ & $0.92\!\pm\!.10$ & $0.79\!\pm\!.17$ & $0.54\!\pm\!.25$ & $0.76\!\pm\!.22$ \\
 on-target control $\Delta$    & $\mathbf{0.63\!\pm\!.06}$ & $1.0$ & $1.0$ & $1.0$ & $1.0$ & $1.0$ \\
 \end{tabular}
-\caption{Leakage with error bars (5 eval seeds: bootstrapped axis $+$ held-out
-gender classifier, resampled generation noise; 60-epoch checkpoints). The
-non-saturating logit-shift decreases as $k$ grows over $k{=}8\!\to\!256$ with the
+\caption{Decontaminated gender leakage while steering sentiment, five evaluation
+seeds, 60-epoch checkpoints (lower leakage $=$ better disentanglement). The
+non-saturating logit-shift decreases as $k$ grows over $k{=}8\!\to\!256$, with the
 endpoint cleanly above the mean-pool floor; adjacent $k$ overlap (model-level seeds
-pending). Two departures from a pure dimensionality story: control collapses at
-$k{=}8$, and the learned $k{=}512$ leaks far above mean-pool M1 (parametrization
-offset). The single-seed values in Table~\ref{tab:ksweep} fall within these bars
-but are individually unreliable.}
+pending). Note the capacity collapse at $k{=}8$ (control $\Delta$) and the
+parametrization offset at learned $k{=}512$.}
 \label{tab:leakrobust}
 \end{table}
 
-\paragraph{Directly measuring superposition in code space.}
-The behavioral sweep shows leakage is monotone in $1/k$, but does not by itself
-prove the cause is \emph{superposition} rather than, say, a reduced capacity to
-represent any attribute at all. We test the mechanism directly with the
-\emph{Manifold Probe} of \cite{manifold2026}, applied to the code space. For each
-attribute $a\in\{$sentiment, gender, animal, length$\}$ with scalar label $z$, the
-probe learns the smooth features $f(z)=\bm\beta^\top h(z)$ that are linearly
-predictable from the codes $\cb$ (a generalized-eigenproblem closed form), together
-with their encoding directions, recovering the attribute's encoding \emph{subspace}
-$\mathcal{Q}_a\subseteq\R^{k}$; its \emph{manifold dimension} is the rank of that
-subspace. We quantify superposition geometrically: the pairwise interference
-$\mathrm{overlap}(\mathcal{Q}_a,\mathcal{Q}_b)$ (mean squared cosine of the
-principal angles, in $[0,1]$), its mean over off-diagonal pairs, and the
-\emph{capacity ratio} $\sum_a \dim\mathcal{Q}_a / k$ (concept dimensions packed per
-code dimension; $>1$ forces sharing). Metrics are averaged over five train/test
-splits on $N{=}1500$ held-out stories; we use readout (linear-probe) directions,
-the geometry that governs linear separability and hence leakage. On synthetic data
-the metrics read $\approx 0$ for attributes on orthogonal axes and large for
-attributes packed into a shared direction, so a positive value is not an artifact
-of small $k$ (we subtract the random-direction baseline $1/k$).
+\subsection{Directly measuring superposition}
+\label{sec:superpos}
+The behavioral sweep is consistent with superposition, but does not by itself
+distinguish it from a generic loss of capacity. We test the mechanism directly with
+the Manifold Probe~\cite{manifold2026}, applied to the code space. For each attribute
+$a\in\{\text{sentiment, gender, animal, length}\}$ with scalar label $z$, the probe
+learns the smooth features $f(z)=\bm\beta^\top h(z)$ linearly predictable from the
+codes $\cb$ (a generalized-eigenproblem closed form) together with their encoding
+directions, recovering the attribute's encoding \emph{subspace}
+$\mathcal Q_a\subseteq\R^{k}$ (its \emph{manifold dimension} is the rank of that
+subspace). We quantify superposition geometrically: the pairwise interference
+$\mathrm{overlap}(\mathcal Q_a,\mathcal Q_b)$ (mean squared cosine of principal
+angles, in $[0,1]$), its mean over off-diagonal pairs, and a \emph{capacity ratio}
+$\sum_a\dim\mathcal Q_a/k$. We use readout (linear-probe) directions---the geometry
+governing linear separability---and average over five splits on $N{=}1500$ held-out
+stories. On synthetic data these read $\approx 0$ for attributes on orthogonal axes
+and large for attributes packed into a shared direction, and we subtract the
+random-direction baseline $1/k$, so a positive value is not an artifact of small $k$.
 
-Every superposition measure increases \emph{strictly monotonically} as $k$
-shrinks---across all \emph{six} code sizes and with five seeds, this is the
-cleanest and most robust signal in the study (Table~\ref{tab:superpos}). The
-interference of the specific steering pair---sentiment vs.\ gender, the attributes
-that actually leak---rises monotonically from $0.003$ at the mean-pool reference to
-$0.138$ at $k{=}8$. Against the \emph{robust} (multi-seed) leakage logit-shift it
-correlates at Pearson $r{=}0.90$ over all six points, rising to $r{=}0.97$
-(Spearman $\rho{=}1.0$) once the learned $k{=}512$ outlier is set aside---and that
-outlier is itself diagnostic: its behavioral leakage is inflated by the
-parametrization offset while its measured superposition is correctly low, exactly
-the dissociation one expects when entanglement comes from the conditioning stack
-rather than the bottleneck. This converts the superposition account from an
-inference into a measurement: where the dimensional mechanism applies, shrinking
-the code forces correlated attributes to \emph{share encoding directions}, and the
-amount of sharing tracks how strongly steering one attribute drags the other.
+Every superposition measure increases strictly monotonically as $k$ shrinks---across
+all six code sizes and five seeds, the cleanest trend in the study
+(Table~\ref{tab:superpos}). The interference of the steering pair itself
+(sentiment vs.\ gender, the attributes that leak) rises monotonically from $0.003$ at
+the mean-pool reference to $0.138$ at $k{=}8$, and tracks the robust leakage
+logit-shift at Pearson $r{=}0.90$ over all six points (rising to $r{=}0.97$, Spearman
+$\rho{=}1.0$, once the learned $k{=}512$ outlier is set aside). That outlier is itself
+diagnostic: its behavioral leakage is inflated by the parametrization offset while its
+measured superposition is correctly low---the dissociation one expects when
+entanglement comes from the conditioning stack rather than the bottleneck. Where the
+dimensional mechanism applies, shrinking the code forces correlated attributes to
+share encoding directions, and the amount of sharing co-varies with how strongly
+steering one attribute drags the other.
 
 \begin{table}[h]\centering\small
 \begin{tabular}{l cccccc c}
@@ -428,45 +314,45 @@ code dim $k$ & 8 & 16 & 64 & 256 & 512\,(lrn) & M1 & corr. \\
 \hline
 sentiment--gender interference & 0.138 & 0.083 & 0.069 & 0.047 & 0.033 & 0.003 & $r{=}0.90$ \\
 mean off-diagonal interference & 0.166 & 0.122 & 0.055 & 0.045 & 0.028 & 0.017 & $r{=}0.88$ \\
-capacity ratio ($\sum\!\dim\mathcal{Q}_a/k$) & 0.700 & 0.388 & 0.100 & 0.021 & 0.010 & 0.008 & $r{=}0.89$ \\
+capacity ratio ($\sum\!\dim\mathcal Q_a/k$) & 0.700 & 0.388 & 0.100 & 0.021 & 0.010 & 0.008 & $r{=}0.89$ \\
 \hline
 leakage logit-shift (5 seeds)  & 1.31 & 0.97 & 0.76 & 0.45 & 0.81 & 0.37 & --- \\
 \end{tabular}
-\caption{Superposition measured directly in code space with the Manifold
-Probe~\cite{manifold2026} ($N{=}1500$ stories, 5 seeds), all six code sizes.
-Every measure grows \emph{strictly monotonically} as $k$ shrinks (the most robust
-trend in the paper) and correlates with the robust multi-seed leakage logit-shift
-at Pearson $r{=}0.88\text{--}0.90$ ($r{=}0.97$, Spearman $\rho{=}1.0$, excluding the
-learned $k{=}512$ outlier, whose leakage is inflated by the parametrization offset
-while its superposition is correctly low). ``lrn'' = learned $k{=}512$ code; M1 =
+\caption{Superposition measured in code space with the Manifold
+Probe~\cite{manifold2026} ($N{=}1500$, five seeds), all six code sizes. Every measure
+grows strictly monotonically as $k$ shrinks and co-varies with the robust leakage
+logit-shift at $r{=}0.88\text{--}0.90$ ($r{=}0.97$, Spearman $\rho{=}1.0$, excluding
+the learned $k{=}512$ outlier, whose leakage is inflated by the parametrization offset
+while its superposition is correctly low). ``lrn'' $=$ learned $k{=}512$; M1 $=$
 mean-pool reference.}
 \label{tab:superpos}
 \end{table}
 
-\paragraph{A natural fix fails: decorrelating the code axes.}
+\subsection{A natural fix fails, revealing the entanglement is intrinsic}
+\label{sec:mitig}
 If leakage were merely a matter of non-orthogonal readout axes, penalizing that
-non-orthogonality during training should remove it. We add a decorrelation
-regularizer $\lambda_{\mathrm{dec}}\,\cos^2(\bm u_{\text{sent}},\bm u_{\text{gen}})$
-on the code-space difference-of-means axes (formed over the global batch) and sweep
-$\lambda_{\mathrm{dec}}\in\{1,3,10\}$ at $k{=}64$ under matched budget. It fails,
-for two independent reasons (Table~\ref{tab:mitig}). First, it \emph{destabilizes}
-the flow objective: training diverges, and earlier for larger $\lambda$
-($\lambda{=}10$ blows up by epoch~45 with $\ell_2$ velocity loss $\sim\!10^4$,
-$\lambda{=}3$ by epoch~39, $\lambda{=}1$ only in the final epochs)---the penalty
-fights velocity matching. Second, and more telling, at the one setting that stays
-trainable ($\lambda{=}1$, read at its pre-divergence checkpoint) the regularizer
-\emph{does} drive the code-axis cosine down (training $\cos^2$ falls
+non-orthogonality during training should remove it. We add a decorrelation term
+$\lambda_{\mathrm{dec}}\cos^2(\bm u_{\text{sent}},\bm u_{\text{gen}})$ on the
+code-space difference-of-means axes (formed over the global batch) and sweep
+$\lambda_{\mathrm{dec}}\in\{1,3,10\}$ at $k{=}64$ under matched budget. It fails for
+two independent reasons (Table~\ref{tab:mitig}). First, it \emph{destabilizes} the
+flow objective: training diverges, earlier for larger $\lambda$ ($\lambda{=}10$ blows
+up by epoch~45 with $\ell_2$ velocity loss $\sim\!10^4$, $\lambda{=}3$ by epoch~39,
+$\lambda{=}1$ only in the final epochs). Second, and more telling, at the one setting
+that stays trainable ($\lambda{=}1$, read at its pre-divergence checkpoint) the
+regularizer \emph{does} drive the code-axis cosine down (training $\cos^2$ falls
 $\approx0.13\!\to\!0.05$) yet gender leakage does not fall---it \emph{rises}
-(logit-shift $0.76\!\to\!1.65$), with on-target control preserved
-($\Delta{=}0.93$). Decorrelating the \emph{readout} geometry in code space thus
-does not disentangle \emph{generation}: the decoder re-entangles the attributes
-downstream. This dissociation---readout interference tracks leakage \emph{across}
-$k$ (observational, $r{=}0.9$), but \emph{intervening} to reduce it does not reduce
-leakage (and can worsen it)---is itself evidence that the entanglement is intrinsic
-to conditioning on a low-rank code under correlated attributes, not a removable
-artifact of the readout axes. A fix would have to act on the generation pathway
-(e.g.\ an adversary on the decoder output) rather than on code-space geometry; we
-leave this to future work.
+(logit-shift $0.76\!\to\!1.65$), with control preserved ($\Delta{=}0.93$).
+Decorrelating the \emph{readout} geometry in code space thus does not disentangle
+\emph{generation}: the decoder re-entangles the attributes downstream.
+
+This is a dissociation between an observational and an interventional quantity:
+readout interference tracks leakage \emph{across} $k$ ($r{=}0.9$), but
+\emph{intervening} to reduce it does not reduce leakage and can worsen it. We read
+this as evidence that, under correlated attributes, the entanglement is intrinsic to
+conditioning on a low-rank code rather than a removable artifact of the readout
+axes---so a remedy would have to act on the generation pathway (e.g.\ an adversary on
+the decoder output), which we leave to future work.
 
 \begin{table}[h]\centering\small
 \begin{tabular}{l cccc}
@@ -478,43 +364,55 @@ on-target control $\Delta$     & $1.00$ & $0.93$ & --- & --- \\
 training                       & stable & diverges ep57 & diverges ep39 & diverges ep45 \\
 \end{tabular}
 \caption{Decorrelating the code-space sentiment/gender axes fails as a fix at
-$k{=}64$ (5-seed leakage; $\lambda{=}1$ read at its pre-divergence checkpoint, epoch
-56). It lowers the code-axis cosine but \emph{increases} generation leakage---readout
-geometry is dissociated from generation---and destabilizes the flow objective, with
-divergence onset earlier for larger $\lambda$. ``---'' = no usable converged model.}
+$k{=}64$ ($\lambda{=}1$ read at its pre-divergence checkpoint, epoch 56). It lowers
+the code-axis cosine but \emph{increases} generation leakage---readout geometry is
+dissociated from generation---and destabilizes the flow objective, with divergence
+onset earlier for larger $\lambda$. ``---'' $=$ no usable converged model.}
 \label{tab:mitig}
 \end{table}
 
-\paragraph{Takeaway.} Contrary to the intuition that a compact ``semantic
-manifold'' code yields cleaner, more disentangled control, we find the opposite:
-a low-rank conditioning code induces attribute superposition and \emph{worse}
-linear separability than full-rank conditioning, while down to moderate $k$ both
-retain full single-factor controllability (control survives until the extreme
-$k{=}8$ bottleneck, where it collapses with leakage together). The directly
-measured superposition is the robust core: it grows strictly monotonically as the
-code shrinks (5 seeds, six code sizes) and predicts the multi-seed leakage at
-$r{=}0.90$. The behavioral leakage corroborates this in the mean but is noisier,
-and exposes two informative departures from a pure dimensionality story---capacity
-collapse at $k{=}8$ and a parametrization offset at $k{=}d$ (the learned full-rank
-code leaks well above mean-pool, while its superposition is correctly low). The
-obvious fix---decorrelating the code axes---does not work (it lowers the code-axis
-cosine but raises generation leakage, and destabilizes training), which argues the
-entanglement is \emph{intrinsic} to conditioning on a low-rank code under correlated
-attributes rather than a removable artifact of readout geometry. The honest
-remaining gaps are model-level seeds to separate adjacent $k$ and a
-generation-pathway (not code-geometry) mitigation. Together this reframes the
-contribution from a better controllable LM toward a study of how the geometry of
-the conditioning variable governs disentanglement---connecting controllable
-generation directly to the superposition phenomenon of \cite{manifold2026}.
+% ===========================================================================
+\section{Discussion}
+% ===========================================================================
+Contrary to the intuition that a compact ``semantic manifold'' code yields cleaner,
+more disentangled control, we find a low-rank conditioning code induces attribute
+superposition and worse linear separability than full-rank conditioning, while
+retaining single-factor controllability down to moderate $k$ (control survives until
+the extreme $k{=}8$ bottleneck, where it collapses together with leakage). The
+directly measured superposition is the robust core of the result---strictly monotone
+in $1/k$ across six code sizes and five seeds, co-varying with leakage at $r{=}0.90$.
+The behavioral leakage corroborates this in the mean but is noisier and exposes two
+informative departures (capacity collapse at $k{=}8$, parametrization offset at
+$k{=}d$). The obvious decorrelation fix does not work and, in failing, argues the
+entanglement is intrinsic to low-rank conditioning under correlated attributes.
+
+\paragraph{Limitations.} Our strongest claims rest on eval-seed error bars; separating
+adjacent $k$ needs model-level seeds (each $k$ retrained), which we are running. The
+study is on TinyStories with two lexicon-labeled attributes; a second, ideally
+uncorrelated, attribute pair would test the specificity of the effect to correlated
+attributes. A generation-pathway mitigation remains open. We view the contribution as
+reframing this conditioning design from a controllability method toward a study of how
+the geometry of the conditioning variable relates to disentanglement, connecting
+controllable generation to the superposition phenomenon of \cite{manifold2026}.
 
 % ===========================================================================
 \begin{thebibliography}{9}
 \bibitem{elf2026} K.~Hu et al. \emph{ELF: Embedded Language Flows.}
   arXiv:2605.10938, 2026.
-\bibitem{manifold2026} \emph{Probing for Representation Manifolds in
-  Superposition.} arXiv:2605.18537, 2026.
-\bibitem{tinystories} R.~Eldan and Y.~Li. \emph{TinyStories: How Small Can
-  Language Models Be and Still Speak Coherent English?} arXiv:2305.07759, 2023.
+\bibitem{manifold2026} \emph{Probing for Representation Manifolds in Superposition.}
+  arXiv:2605.18537, 2026.
+\bibitem{tinystories} R.~Eldan and Y.~Li. \emph{TinyStories: How Small Can Language
+  Models Be and Still Speak Coherent English?} arXiv:2305.07759, 2023.
+\bibitem{diffusionlm} X.~L.~Li, J.~Thickstun, I.~Gulrajani, P.~Liang, T.~Hashimoto.
+  \emph{Diffusion-LM Improves Controllable Text Generation.} NeurIPS, 2022.
+\bibitem{pplm} S.~Dathathri et al. \emph{Plug and Play Language Models: A Simple
+  Approach to Controlled Text Generation.} ICLR, 2020.
+\bibitem{betavae} I.~Higgins et al. \emph{$\beta$-VAE: Learning Basic Visual Concepts
+  with a Constrained Variational Framework.} ICLR, 2017.
+\bibitem{locatello} F.~Locatello et al. \emph{Challenging Common Assumptions in the
+  Unsupervised Learning of Disentangled Representations.} ICML, 2019.
+\bibitem{elhage} N.~Elhage et al. \emph{Toy Models of Superposition.} Transformer
+  Circuits Thread, 2022.
 \end{thebibliography}
 
 \end{document}
