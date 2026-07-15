@@ -249,7 +249,7 @@ def train_step(
             log_probs = jax.nn.log_softmax(decoder_logits.astype(jnp.float32), axis=-1)
             ce = -jnp.take_along_axis(log_probs, decoder_targets[..., None], axis=-1).squeeze(-1)
             ce_loss = (ce * loss_mask).sum() / jnp.maximum(loss_mask.sum(), 1.0)
-            return ce_loss, ce_loss, jnp.zeros(()), jnp.zeros(()), jnp.zeros(()), jnp.zeros(())
+            return ce_loss, ce_loss, jnp.zeros(()), jnp.zeros(()), jnp.zeros(())
 
         def _denoiser_branch(_):
             # Denoiser mode: x0-noised latent (denoiser_z) at random t, L2 loss on velocity.
@@ -277,7 +277,6 @@ def train_step(
             # M2: information-bottleneck KL on the code + semantic-consistency (cycle).
             cyc_loss = jnp.zeros(())
             ib_loss = jnp.zeros(())
-            dec_loss = jnp.zeros(())
             if config.semantic_factorization and config.manifold_dim > 0:
                 mdim, edim = config.manifold_dim, x0.shape[-1]
                 phi_lift_g, mu, logvar = apply_manifold_code(params["manifold"], phi_vec, mdim, edim)
@@ -287,17 +286,23 @@ def train_step(
                 pooled_hat = compute_phi(x_hat, loss_mask)[:, 0, :]
                 _, mu_hat, _ = apply_manifold_code(params["manifold"], pooled_hat, mdim, edim)
                 cyc_loss = jnp.mean((mu_hat - jax.lax.stop_gradient(mu)) ** 2)
-                # Decorrelation: push sentiment & gender code axes apart (mitigation).
-                if use_decorr:
-                    dec_loss = _decorrelation_loss(mu, sent_lab, gender_lab)
 
-            total = (l2_loss + config.cycle_loss_weight * cyc_loss + config.ib_beta * ib_loss
-                     + config.decorrelation_weight * dec_loss)
-            return total, jnp.zeros(()), l2_loss, cyc_loss, ib_loss, dec_loss
+            total = l2_loss + config.cycle_loss_weight * cyc_loss + config.ib_beta * ib_loss
+            return total, jnp.zeros(()), l2_loss, cyc_loss, ib_loss
 
-        loss, ce_loss, l2_loss, cyc_loss, ib_loss, dec_loss = jax.lax.cond(
+        loss, ce_loss, l2_loss, cyc_loss, ib_loss = jax.lax.cond(
             decoder_step_active, _decoder_branch, _denoiser_branch, None,
         )
+        # Decorrelation regularizer: computed OUTSIDE the cond so its cross-device
+        # psum runs on every device every step. A collective inside jax.lax.cond
+        # deadlocks because decoder_step_active is sampled per-device, so devices
+        # take different branches and the psum is only reached by some of them.
+        dec_loss = jnp.zeros(())
+        if use_decorr and config.semantic_factorization and config.manifold_dim > 0:
+            _, mu_all, _ = apply_manifold_code(
+                params["manifold"], phi_vec, config.manifold_dim, x0.shape[-1])
+            dec_loss = _decorrelation_loss(mu_all, sent_lab, gender_lab)
+        loss = loss + config.decorrelation_weight * dec_loss
         return loss, (l2_loss, ce_loss, cyc_loss, ib_loss, dec_loss)
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)

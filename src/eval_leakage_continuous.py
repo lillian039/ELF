@@ -62,6 +62,8 @@ def parse_args():
     p.add_argument("--samples-per-alpha", type=int, default=24)
     p.add_argument("--alphas", type=str, default="-3,-2,-1,0,1,2,3")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seeds", type=int, default=5,
+                   help="Bootstrap the axis/classifier + vary generation RNG over this many seeds.")
     p.add_argument("--config_override", action="append", default=[])
     return p.parse_args()
 
@@ -181,65 +183,71 @@ def main():
     slab = np.array([lexicon_sentiment(t) for t in texts])
     glab = np.array([gender_label(t) for t in texts])
 
-    # code-space sentiment axis, orthogonalized against gender (the disentanglement test)
-    u = mu[slab > 0].mean(0) - mu[slab < 0].mean(0); u /= np.linalg.norm(u) + 1e-8
-    ug = mu[glab > 0].mean(0) - mu[glab < 0].mean(0); ug /= np.linalg.norm(ug) + 1e-8
-    u = u - (u @ ug) * ug; u /= np.linalg.norm(u) + 1e-8
-    c0 = mu.mean(0)
-
-    # held-out gender classifier in EMBEDDING space (trained on real stories)
-    wg, bg = _fit_linear_classifier(pooled_emb, glab)
-    log_for_0(f"k={cfg.manifold_dim} codes {mu.shape} | held-out gender clf in {d}-dim embedding space")
-
-    # --- steering sweep: generate, then score off-target gender continuously ---
     M = args.samples_per_alpha
-    per_alpha_logit, per_alpha_frac, all_logit, all_alpha = [], [], [], []
-    for a in alphas:
-        c = (c0 + a * u).astype(np.float32)
-        phi_vec = (c @ U) if is_m2 else c
-        phi_lift = jnp.asarray(np.repeat(phi_vec[None, :], M, axis=0))
-        rng, nrng, trng = jax.random.split(rng, 3)
-        z = jax.random.normal(nrng, (M, L, d)) * cfg.denoiser_noise_scale
-        t_steps = get_sampling_steps(trng, n_steps=steps, time_schedule=sc.time_schedule,
-                                     P_mean=cfg.denoiser_p_mean, P_std=cfg.denoiser_p_std)
-        latent = _generate_samples_single_batch(
-            model_params=m0_params, model_apply_fn=m0.apply, rng=nrng,
-            z=z, t_steps=t_steps, cond_seq=None, cond_seq_mask=None,
-            config=cfg, sampling_config=sc, cfg_scale=1.0, self_cond_cfg_scale=sccfg, phi=phi_lift,
-        )
-        pred = np.asarray(mask_after_eos(_dlm_decode_batch(
-            z=latent, model_params=m0_params, model_apply_fn=m0.apply,
-            t_final_val=float(t_steps[-1]), config=cfg, self_cond_cfg_scale=sccfg, phi=phi_lift,
-        ), eos_id, pad_id))
-        gtexts = [tok.decode(pred[m], skip_special_tokens=True) for m in range(M)]
-        # continuous held-out gender logit on the generations
-        emb_gen = _embed_texts(gtexts, tok, L, pad_id, enc_model, enc_params, cfg)
-        logit = emb_gen @ wg - bg
-        frac = float(np.mean([attr_scores(g)[1] for g in gtexts]))  # old binary female_frac
-        per_alpha_logit.append(float(logit.mean()))
-        per_alpha_frac.append(frac)
-        all_logit.extend(logit.tolist()); all_alpha.extend([a] * M)
-
-    all_logit = np.array(all_logit); all_alpha = np.array(all_alpha)
     amin, amax = min(alphas), max(alphas)
-    extreme = (all_alpha == amin) | (all_alpha == amax)
-    auc = _auc(all_logit[extreme], all_alpha[extreme] == amax)
+    nseeds = max(1, args.seeds)
+    boot = np.random.default_rng(args.seed)
+    base_rng = jax.random.PRNGKey(args.seed)
+    metrics = []  # per seed: (frac_range, logit_shift, auc, ctrl_delta)
+    log_for_0(f"k={cfg.manifold_dim} codes {mu.shape} | {nseeds} seeds "
+              f"(bootstrap axis+clf, varied generation RNG)")
 
-    leak_frac = float(np.ptp(per_alpha_frac))
-    leak_logit = float(np.ptp(per_alpha_logit))
+    for si in range(nseeds):
+        # bootstrap the label set for axis + held-out classifier fit
+        idx = boot.integers(0, len(mu), size=len(mu)) if nseeds > 1 else np.arange(len(mu))
+        mu_s, emb_s, sl_s, gl_s = mu[idx], pooled_emb[idx], slab[idx], glab[idx]
+        u = mu_s[sl_s > 0].mean(0) - mu_s[sl_s < 0].mean(0); u /= np.linalg.norm(u) + 1e-8
+        ug = mu_s[gl_s > 0].mean(0) - mu_s[gl_s < 0].mean(0); ug /= np.linalg.norm(ug) + 1e-8
+        u = u - (u @ ug) * ug; u /= np.linalg.norm(u) + 1e-8
+        c0 = mu_s.mean(0)
+        wg, bg = _fit_linear_classifier(emb_s, gl_s)
+        rng = jax.random.fold_in(base_rng, si)
 
+        per_alpha_logit, per_alpha_frac, per_alpha_pos = [], [], []
+        all_logit, all_alpha = [], []
+        for a in alphas:
+            c = (c0 + a * u).astype(np.float32)
+            phi_vec = (c @ U) if is_m2 else c
+            phi_lift = jnp.asarray(np.repeat(phi_vec[None, :], M, axis=0))
+            rng, nrng, trng = jax.random.split(rng, 3)
+            z = jax.random.normal(nrng, (M, L, d)) * cfg.denoiser_noise_scale
+            t_steps = get_sampling_steps(trng, n_steps=steps, time_schedule=sc.time_schedule,
+                                         P_mean=cfg.denoiser_p_mean, P_std=cfg.denoiser_p_std)
+            latent = _generate_samples_single_batch(
+                model_params=m0_params, model_apply_fn=m0.apply, rng=nrng,
+                z=z, t_steps=t_steps, cond_seq=None, cond_seq_mask=None,
+                config=cfg, sampling_config=sc, cfg_scale=1.0, self_cond_cfg_scale=sccfg, phi=phi_lift,
+            )
+            pred = np.asarray(mask_after_eos(_dlm_decode_batch(
+                z=latent, model_params=m0_params, model_apply_fn=m0.apply,
+                t_final_val=float(t_steps[-1]), config=cfg, self_cond_cfg_scale=sccfg, phi=phi_lift,
+            ), eos_id, pad_id))
+            gtexts = [tok.decode(pred[m], skip_special_tokens=True) for m in range(M)]
+            emb_gen = _embed_texts(gtexts, tok, L, pad_id, enc_model, enc_params, cfg)
+            logit = emb_gen @ wg - bg
+            per_alpha_logit.append(float(logit.mean()))
+            per_alpha_frac.append(float(np.mean([attr_scores(g)[1] for g in gtexts])))
+            per_alpha_pos.append(float(np.mean([lexicon_sentiment(g) > 0 for g in gtexts])))
+            all_logit.extend(logit.tolist()); all_alpha.extend([a] * M)
+        all_logit = np.array(all_logit); all_alpha = np.array(all_alpha)
+        extreme = (all_alpha == amin) | (all_alpha == amax)
+        auc = _auc(all_logit[extreme], all_alpha[extreme] == amax)
+        ctrl = per_alpha_pos[-1] - per_alpha_pos[0]   # on-target sentiment control delta
+        metrics.append((float(np.ptp(per_alpha_frac)), float(np.ptp(per_alpha_logit)), auc, ctrl))
+
+    arr = np.array(metrics)             # (nseeds, 4)
+    mean, std = arr.mean(0), arr.std(0)
+    names = ["frac_range(old)", "logit_shift", "gender_AUC", "ctrl_delta"]
     print("\n" + "=" * 64)
-    print(f"NON-SATURATING LEAKAGE (orthogonalized sentiment axis)  k={cfg.manifold_dim}")
+    print(f"NON-SATURATING LEAKAGE (orth. sentiment axis)  k={cfg.manifold_dim}  "
+          f"N={mu.shape[0]} M={M} seeds={nseeds}")
     print("=" * 64)
-    print("  alpha   gender_logit(mean)   female_frac(old)")
-    for a, lg, fr in zip(alphas, per_alpha_logit, per_alpha_frac):
-        print(f"  {a:+5.1f}   {lg:+8.3f}            {fr:.3f}")
-    print(f"\n  female_frac range (OLD, saturating) = {leak_frac:.3f}")
-    print(f"  gender LOGIT-SHIFT (non-saturating)  = {leak_logit:.3f}")
-    print(f"  gender AUC (alpha extremes)          = {auc:.3f}   (0.5=no leak, 1=total)")
+    for i, nm in enumerate(names):
+        print(f"  {nm:<18} = {mean[i]:.3f} +- {std[i]:.3f}")
     print("=" * 64)
-    print(f"LEAKAGE_SUMMARY k={cfg.manifold_dim} frac_range={leak_frac:.3f} "
-          f"logit_shift={leak_logit:.3f} auc={auc:.3f}")
+    print(f"LEAKAGE_SUMMARY k={cfg.manifold_dim} "
+          f"frac_range={mean[0]:.3f}+-{std[0]:.3f} logit_shift={mean[1]:.3f}+-{std[1]:.3f} "
+          f"auc={mean[2]:.3f}+-{std[2]:.3f} ctrl={mean[3]:.3f}+-{std[3]:.3f}")
     print("=" * 64)
 
 
