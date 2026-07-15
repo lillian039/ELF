@@ -52,3 +52,12 @@ Conclusion: decorrelation FAILS. (i) destabilizes flow training, earlier for lar
 (readout geometry dissociated from generation). => entanglement is intrinsic to low-rank
 conditioning under correlated attributes, not a removable readout artifact. A fix must act
 on the generation pathway (e.g. decoder-output adversary), left to future work.
+
+=== lambda=3 RE-RUN (verification, 5-GPU exact repro) ===
+Stable (l2~0.45) through ~epoch 45, then DIVERGES catastrophically:
+l2>100 by ep46, l2>1e4 by ep51, ~6e5 at ep60 (reached step 75000 but blown up).
+dec loss also blows up (0.13 -> 0.65). All 3 retained ckpts (70k/72.5k/75k) post-divergence.
+=> lambda=3 divergence CONFIRMED. Onset run-to-run variable (orig ep39, rerun ep45) but
+outcome consistent. Corrected paper: dropped false "earlier for larger lambda / more
+violent" claim; lambda=3 -> "diverges ~ep45"; noted onset variance. lambda=1 remains the
+only readable pre-divergence run.

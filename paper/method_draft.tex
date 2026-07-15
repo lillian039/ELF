@@ -336,10 +336,14 @@ $\lambda_{\mathrm{dec}}\cos^2(\bm u_{\text{sent}},\bm u_{\text{gen}})$ on the
 code-space difference-of-means axes (formed over the global batch) and sweep
 $\lambda_{\mathrm{dec}}\in\{1,3,10\}$ at $k{=}64$ under matched budget. It fails for
 two independent reasons (Table~\ref{tab:mitig}). First, it \emph{destabilizes} the
-flow objective: training diverges, earlier for larger $\lambda$ ($\lambda{=}10$ blows
-up by epoch~45 with $\ell_2$ velocity loss $\sim\!10^4$, $\lambda{=}3$ by epoch~39,
-$\lambda{=}1$ only in the final epochs). Second, and more telling, at the one setting
-that stays trainable ($\lambda{=}1$, read at its pre-divergence checkpoint) the
+flow objective: every setting eventually diverges (velocity loss $\ell_2$ blowing up
+by three to six orders of magnitude). The weakest penalty ($\lambda{=}1$) survives
+into the final epochs ($\sim$ep~57) and is the only run leaving a readable
+pre-divergence checkpoint; $\lambda{=}3$ and $\lambda{=}10$ diverge around
+epoch~45 into unusable models (onset is run-to-run variable---an earlier $\lambda{=}3$
+run diverged by epoch~39---but divergence is consistent). Second, and more telling, at
+the one setting that stays trainable ($\lambda{=}1$, read at its pre-divergence
+checkpoint) the
 regularizer \emph{does} drive the code-axis cosine down (training $\cos^2$ falls
 $\approx0.13\!\to\!0.05$) yet gender leakage does not fall---it \emph{rises}
 (logit-shift $0.76\!\to\!1.65$), with control preserved ($\Delta{=}0.93$).
@@ -361,13 +365,14 @@ $\lambda_{\mathrm{dec}}$ & 0 (baseline) & 1 & 3 & 10 \\
 code-axis $\cos^2$ (train end) & $\sim$0.07 & $0.13\!\to\!0.05$ & --- & --- \\
 gender leakage (logit-shift)   & $0.76\!\pm\!.30$ & $1.65\!\pm\!.35$ & --- & --- \\
 on-target control $\Delta$     & $1.00$ & $0.93$ & --- & --- \\
-training                       & stable & diverges ep57 & diverges ep39 & diverges ep45 \\
+training                       & stable & diverges $\sim$ep57 & diverges $\sim$ep45 & diverges $\sim$ep45 \\
 \end{tabular}
 \caption{Decorrelating the code-space sentiment/gender axes fails as a fix at
 $k{=}64$ ($\lambda{=}1$ read at its pre-divergence checkpoint, epoch 56). It lowers
 the code-axis cosine but \emph{increases} generation leakage---readout geometry is
-dissociated from generation---and destabilizes the flow objective, with divergence
-onset earlier for larger $\lambda$. ``---'' $=$ no usable converged model.}
+dissociated from generation---and destabilizes the flow objective: every $\lambda$
+eventually diverges, the weakest ($\lambda{=}1$) latest and mildest.
+``---'' $=$ no usable converged model.}
 \label{tab:mitig}
 \end{table}
 
