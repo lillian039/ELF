@@ -41,8 +41,10 @@ space shows attribute superposition rising strictly monotonically as $k$ shrinks
 (five seeds, six code sizes) and co-varying with off-target leakage across code sizes
 ($r{=}0.90$); within a fixed model, however, interference does \emph{not} predict
 which attribute pairs leak (mean within-model Spearman $-0.53$ over twelve directed
-pairs), so the probe reads as an aggregate symptom of capacity pressure rather than a
-pair-level router. Two interventions sharpen this reading. Decorrelating the code
+pairs); which pairs leak is set instead by the fragility of the target attribute,
+with token-local attributes (gender, animal) absorbing the leakage that globally
+distributed ones (tone, length) resist. The probe thus reads as an aggregate symptom
+of capacity pressure rather than a pair-level router. Two interventions sharpen this reading. Decorrelating the code
 axes during training fails three different ways as the penalty grows: it games the
 trained metric (the code-axis cosine falls while probed subspace interference triples
 and leakage rises across pairs), destabilizes the flow objective, and at high penalty
@@ -324,7 +326,11 @@ measured superposition is correctly low, the dissociation one expects when
 entanglement comes from the conditioning stack rather than the bottleneck. Where the
 dimensional mechanism applies, shrinking the code forces attributes to share encoding
 directions, and the amount of sharing co-varies with how strongly steering one
-attribute drags the others.
+attribute drags the others. The packing is only loosely geometric even in code space:
+across all 36 (model, pair) cells, pairwise interference correlates with the demand
+ratio $(\dim\mathcal Q_a+\dim\mathcal Q_b)/k$ at $r{=}0.62$ ($R^2{=}0.38$), so
+measured subspace dimensions predict the broad scale of interference but not its
+pair-level detail.
 
 \paragraph{The correlation is between models, not between pairs.} The $r{=}0.90$
 above compares \emph{models} (one point per $k$). A finer-grained mechanism, in which
@@ -337,12 +343,25 @@ within-model rank correlation between pairwise interference and pairwise leakage
 pooled regressions with model fixed effects assign interference no incremental
 explanatory power ($R^2$ $0.580\!\to\!0.592$; directed version $F(1,62){=}0.55$).
 Held out, an interference-based predictor is \emph{worse} than predicting each
-model's mean leakage for every pair (RMSE $0.31$ vs.\ $0.26$). Which pairs leak is
-instead dominated by the target attribute's own properties (its classifier margin
-and base rate). The probe, then, is an aggregate dose indicator: it reads \emph{how
-much} capacity pressure a code is under (and \S\ref{sec:mitig} shows it also moves in
-the right direction under intervention), but it does not resolve \emph{which} pairs
-pay for that pressure behaviorally.
+model's mean leakage for every pair (RMSE $0.31$ vs.\ $0.26$).
+
+What \emph{does} structure the directed pairs is the identity of the target
+attribute. In a variance decomposition over all 72 (model, source, target) cells,
+model fixed effects explain $R^2{=}0.24$ of directed leakage; adding target fixed
+effects raises this to $0.52$, adding source effects only to $0.53$, and adding
+interference on top contributes $+0.001$. Leakage flows preferentially \emph{into}
+gender ($+0.19$ in calibrated logit units, relative to each model's mean) and animal
+($+0.21$), and away from sentiment ($-0.26$) and length ($-0.14$), consistently
+across models and sources. The split is not explained by base rate or by how
+steerable the attribute is as a source; the leak-prone targets are the
+\emph{token-local} attributes (a protagonist's pronouns, an animal mention), while
+the \emph{globally distributed} ones (overall tone, story length) resist incidental
+flipping. Because the leakage classifiers are std-calibrated on real data, these are
+comparable units rather than scale artifacts. The probe, then, is an aggregate dose
+indicator: it reads \emph{how much} capacity pressure a code is under (and
+\S\ref{sec:mitig} shows it also moves in the right direction under intervention),
+but \emph{which} pairs pay for that pressure is set by the fragility of the target
+attribute, not by pair geometry.
 
 \begin{table}[h]\centering\small
 \begin{tabular}{l cccccc c}
@@ -508,8 +527,10 @@ $k{=}d$).
 
 The two interventions and the pair-level analysis then fix the interpretation. The
 probe--leakage correlation is a \emph{between-model} regularity: within a model,
-interference does not pick out which attribute pairs leak (\S\ref{sec:superpos}), so
-the probe should be read as a thermometer for aggregate capacity pressure (a reading
+interference does not pick out which attribute pairs leak; target fragility does,
+with token-local attributes absorbing the leakage that globally distributed ones
+resist (\S\ref{sec:superpos}). The probe should be read as a thermometer for
+aggregate capacity pressure (a reading
 that even survives intervention, rising together with leakage under the $\lambda{=}1$
 regularizer) rather than as a circuit-level map from shared subspaces to behavioral
 leakage. The decorrelation sweep shows the geometry is not the lever: penalizing the

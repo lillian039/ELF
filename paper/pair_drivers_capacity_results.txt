@@ -1,0 +1,59 @@
+models loaded: [16, 256, 512, 64, 8, 'M1']  (mdim attrs: ['animal', 'gender', 'length', 'sentiment'])
+
+== Part 1: what explains directed leakage (n=72) ==
+  R2  C(model)                      = 0.241
+  R2  C(model)+C(source)            = 0.291
+  R2  C(model)+C(target)            = 0.516
+  R2  C(model)+C(source)+C(target)  = 0.527
+  R2  ... + interference            = 0.528
+  R2  interference alone            = 0.027
+
+  per-TARGET effect (mean demeaned leak into attribute):
+    sentiment  -0.256 +- 0.040
+    gender     +0.185 +- 0.081
+    animal     +0.210 +- 0.081
+    length     -0.140 +- 0.034
+  per-SOURCE effect:
+    sentiment  +0.060 +- 0.067
+    gender     -0.056 +- 0.083
+    animal     -0.110 +- 0.086
+    length     +0.106 +- 0.068
+
+  target correlates: base_rate  |  mean ctrl as source  |  target effect
+    sentiment  p+=0.808   ctrl=0.946   eff=-0.256
+    gender     p+=0.461   ctrl=0.949   eff=+0.185
+    animal     p+=0.774   ctrl=0.879   eff=+0.210
+    length     p+=0.491   ctrl=-0.114   eff=-0.140
+
+  scale-free check (y = target AUC - 0.5):
+  R2  C(model)                      = 0.053
+  R2  C(model)+C(target)            = 0.207
+  R2  C(model)+C(source)            = 0.148
+  R2  ... both + interference       = 0.303
+  per-TARGET AUC effect:
+    sentiment  +0.284
+    gender     +0.375
+    animal     +0.387
+    length     +0.377
+
+  per-attribute manifold dim (mean over models):
+    sentiment  mdim=1.27 (range 1.0-1.6)
+    gender     mdim=1.83 (range 1.0-2.0)
+    animal     mdim=1.00 (range 1.0-1.0)
+    length     mdim=1.37 (range 1.0-1.8)
+
+== Part 2: capacity/packing law ==
+  per-model: k, capacity C=sum(mdim)/k, mean off-diag interference, excess
+       8  C=0.700  off=0.166  excess=+0.041
+      16  C=0.388  off=0.122  excess=+0.059
+      64  C=0.100  off=0.055  excess=+0.040
+     256  C=0.021  off=0.045  excess=+0.041
+     512  C=0.010  off=0.028  excess=+0.026
+      M1  C=0.008  off=0.017  excess=+0.015
+
+  36 (model,pair) points: obs interference vs predictors
+    vs random-packing max(d_a,d_b)/k : r=0.595  R2=0.354  slope~0.69
+    vs additive demand (d_a+d_b)/k  : r=0.615  R2=0.379  slope~0.44
+    obs/random ratio per model-scale: 0.6, 0.2, 1.1, 0.5, 1.0, 1.2
+
+  model level (n=6): excess interference vs C: r=0.542; mean-12-pair leak vs C: r=0.791
