@@ -1,9 +1,9 @@
-% ---------------------------------------------------------------------------
+% ===========================================================================
 % Attribute Superposition in Low-Rank Semantic Conditioning of Embedding Flows.
 % Analysis paper: the low-rank "semantic manifold" code is a NEGATIVE result;
 % the contribution is the directly-measured superposition mechanism and the
 % failed decorrelation fix. Self-contained; compiles with pdflatex.
-% ---------------------------------------------------------------------------
+% ===========================================================================
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
@@ -47,8 +47,8 @@ axes during training fails three different ways as the penalty grows: it games t
 trained metric (the code-axis cosine falls while probed subspace interference triples
 and leakage rises across pairs), destabilizes the flow objective, and at high penalty
 produces models whose conditioning no longer steers generation at all. And
-manipulating the \emph{data}---retraining on corpora whose sentiment--gender
-correlation is set to $\phi\in\{-0.3,0,+0.15,+0.3\}$ at fixed marginals---changes
+manipulating the \emph{data} (retraining on corpora whose sentiment--gender
+correlation is set to $\phi\in\{-0.3,0,+0.15,+0.3\}$ at fixed marginals) changes
 neither measured superposition nor leakage, at either $k{=}64$ or $k{=}16$: the
 entanglement is driven by the capacity of the bottleneck, not by correlations in the
 training data or the readout geometry. Our results connect controllable generation to
@@ -64,16 +64,16 @@ ELF~\cite{elf2026} models text as a continuous flow in the token-embedding space
 a frozen encoder $E$: a full-attention Transformer denoises an entire embedding
 sequence $\xb\in\R^{L\times d}$ from Gaussian noise to clean embeddings,
 discretizing to tokens only at $t{=}1$ via a shared decoder head. Global sentence
-structure is \emph{already} present---every position attends to every other at every
-step---but only implicitly, distributed across attention and never exposed as a
+structure is \emph{already} present, since every position attends to every other at
+every step, but only implicitly, distributed across attention and never exposed as a
 manipulable object.
 
 A natural idea, and the one we study, is to factor that structure into an explicit,
 sentence-level \emph{semantic code} $\phib(s)$ and flow only the residual
 $\rb=\xb-\phib(s)$ conditioned on it. Making $\phib(s)=U\cb$ a learned low-rank code
 $\cb\in\R^{k}$ turns the conditioning variable's dimensionality and geometry into
-knobs we can set and probe. The motivating intuition---shared with much of the
-disentanglement literature---is that squeezing conditioning through a compact
+knobs we can set and probe. The motivating intuition, shared with much of the
+disentanglement literature, is that squeezing conditioning through a compact
 ``semantic manifold'' should concentrate reusable global structure and yield cleaner,
 more separable control.
 
@@ -83,7 +83,7 @@ the steering axis of correlated attributes it disentangles \emph{worse}. Rather 
 stop at a negative result, we ask \emph{why}, and find a concrete mechanism:
 squeezing many attributes through a low-rank code forces them into
 \emph{superposition}, which we measure directly with the Manifold Probe of
-\cite{manifold2026}---and which two interventions (regularizing the code geometry,
+\cite{manifold2026}, and which two interventions (regularizing the code geometry,
 and controlling attribute correlations in the training data) locate in the
 bottleneck's capacity rather than in the data or the readout axes.
 
@@ -96,18 +96,18 @@ or disentanglement over full-rank conditioning, and is measurably more entangled
 a decontaminated test (\S\ref{sec:leak}).
 (iii) The mechanism, measured directly: applying the Manifold Probe to the code
 space, attribute superposition grows strictly monotonically as $k$ shrinks (five
-seeds, six code sizes---the study's most robust trend) and tracks the multi-seed
+seeds, six code sizes; the study's most robust trend) and tracks the multi-seed
 off-target leakage at $r{=}0.90$ across code sizes; a twelve-directed-pair analysis
-shows this relation is \emph{between}-model only---within a fixed model, interference
-does not rank which pairs leak (\S\ref{sec:superpos}).
+shows this relation is \emph{between}-model only, as within a fixed model
+interference does not rank which pairs leak (\S\ref{sec:superpos}).
 (iv) Evidence the entanglement is \emph{intrinsic}: a decorrelation regularizer
-swept over $\lambda\in\{1,3,10\}$ fails in three distinct ways---metric gaming (the
+swept over $\lambda\in\{1,3,10\}$ fails in three distinct ways: metric gaming (the
 trained cosine falls while probed interference triples and leakage rises), training
-divergence, and, at high $\lambda$, total loss of steerability---so any remedy must
-act on the generation pathway, not code geometry (\S\ref{sec:mitig}).
+divergence, and, at high $\lambda$, total loss of steerability. Any remedy must
+therefore act on the generation pathway, not code geometry (\S\ref{sec:mitig}).
 (v) A causal test of the data-side driver: retraining with the sentiment--gender
 correlation set to $\phi\in\{-0.3,0,+0.15,+0.3\}$ at fixed marginals leaves both
-superposition and leakage unchanged at $k{=}64$ and $k{=}16$---capacity pressure, not
+superposition and leakage unchanged at $k{=}64$ and $k{=}16$: capacity pressure, not
 data correlation, drives the effect (\S\ref{sec:rho}).
 
 % ===========================================================================
@@ -132,7 +132,7 @@ $\beta$-VAE~\cite{betavae}. Locatello et al.~\cite{locatello} showed that
 \emph{unsupervised} disentanglement is unidentifiable without inductive biases or
 supervision. We differ in setting and claim: we work in \emph{supervised,
 conditional generation}, and rather than seek identifiability we identify and
-directly measure a specific geometric failure mode---superposition induced by a
+directly measure a specific geometric failure mode: superposition induced by a
 low-rank conditioning bottleneck under correlated attributes.
 
 \paragraph{Superposition and mechanistic interpretability.} Neural representations
@@ -150,8 +150,8 @@ superposition to a behavioral quantity (off-target leakage).
 \paragraph{Semantic / residual factorization.} Let $\xb=E(s)\in\R^{L\times d}$ be the
 frozen, normalized encoder embeddings of a sentence $s$ and $\bm m\in\{0,1\}^{L}$ mask
 the valid positions. We split the embedding additively into a sentence-level code
-$\phib(s)$ (broadcast over $L$) and a residual, and---unlike ELF, which models
-$p(\xb)$---model the conditional residual $p(\rb\mid\phib(s))$:
+$\phib(s)$ (broadcast over $L$) and a residual, and, unlike ELF, which models
+$p(\xb)$, model the conditional residual $p(\rb\mid\phib(s))$:
 \begin{equation}
   \xb=\phib(s)+\rb,\qquad \rb=\xb-\phib(s).
   \label{eq:split}
@@ -267,11 +267,11 @@ vs.\ M1: $0.37\!\pm\!0.06$); adjacent $k$ overlap at five evaluation seeds, so w
 claim the trend and the endpoint gap rather than strict step-by-step separation, and
 flag model-level seeds as the main remaining rigor gap. Two departures from a pure
 dimensionality story are informative. \emph{Capacity collapse at $k{=}8$:} on-target
-control, $1.0$ at every larger $k$, drops to $0.63\!\pm\!0.06$---the extreme bottleneck
+control, $1.0$ at every larger $k$, drops to $0.63\!\pm\!0.06$: the extreme bottleneck
 can no longer represent the steered attribute, so leakage and control fail together.
 \emph{Parametrization offset at $k{=}d$:} the learned $k{=}512$ code leaks
 $0.81\!\pm\!0.29$, far above the mean-pool M1's $0.37$ at equal dimension, even though
-its measured superposition is correctly low (\S\ref{sec:superpos})---the learned
+its measured superposition is correctly low (\S\ref{sec:superpos}): the learned
 conditioning stack introduces some entanglement of its own, beyond the dimensional
 effect.
 
@@ -306,29 +306,29 @@ $\mathcal Q_a\subseteq\R^{k}$ (its \emph{manifold dimension} is the rank of that
 subspace). We quantify superposition geometrically: the pairwise interference
 $\mathrm{overlap}(\mathcal Q_a,\mathcal Q_b)$ (mean squared cosine of principal
 angles, in $[0,1]$), its mean over off-diagonal pairs, and a \emph{capacity ratio}
-$\sum_a\dim\mathcal Q_a/k$. We use readout (linear-probe) directions---the geometry
-governing linear separability---and average over five splits on $N{=}1500$ held-out
+$\sum_a\dim\mathcal Q_a/k$. We use readout (linear-probe) directions, the geometry
+governing linear separability, and average over five splits on $N{=}1500$ held-out
 stories. On synthetic data these read $\approx 0$ for attributes on orthogonal axes
 and large for attributes packed into a shared direction, and we subtract the
 random-direction baseline $1/k$, so a positive value is not an artifact of small $k$.
 
-Every superposition measure increases strictly monotonically as $k$ shrinks---across
-all six code sizes and five seeds, the cleanest trend in the study
+Every superposition measure increases strictly monotonically as $k$ shrinks, across
+all six code sizes and five seeds; this is the cleanest trend in the study
 (Table~\ref{tab:superpos}). The interference of the steering pair itself
 (sentiment vs.\ gender, the attributes that leak) rises monotonically from $0.003$ at
 the mean-pool reference to $0.138$ at $k{=}8$, and tracks the robust leakage
 logit-shift at Pearson $r{=}0.90$ over all six points (rising to $r{=}0.97$, Spearman
 $\rho{=}1.0$, once the learned $k{=}512$ outlier is set aside). That outlier is itself
 diagnostic: its behavioral leakage is inflated by the parametrization offset while its
-measured superposition is correctly low---the dissociation one expects when
+measured superposition is correctly low, the dissociation one expects when
 entanglement comes from the conditioning stack rather than the bottleneck. Where the
 dimensional mechanism applies, shrinking the code forces attributes to share encoding
 directions, and the amount of sharing co-varies with how strongly steering one
 attribute drags the others.
 
 \paragraph{The correlation is between models, not between pairs.} The $r{=}0.90$
-above compares \emph{models} (one point per $k$). A finer-grained mechanism---pairs
-that share more subspace leak more into each other---would predict the same relation
+above compares \emph{models} (one point per $k$). A finer-grained mechanism, in which
+pairs that share more subspace leak more into each other, would predict the same relation
 \emph{within} a model. It does not hold. Measuring all twelve directed pairs among
 our four attributes per model (each source axis decontaminated against all other
 attributes, one generation batch scored against every off-target classifier), the
@@ -339,9 +339,9 @@ explanatory power ($R^2$ $0.580\!\to\!0.592$; directed version $F(1,62){=}0.55$)
 Held out, an interference-based predictor is \emph{worse} than predicting each
 model's mean leakage for every pair (RMSE $0.31$ vs.\ $0.26$). Which pairs leak is
 instead dominated by the target attribute's own properties (its classifier margin
-and base rate). The probe, then, is an aggregate dose indicator---it reads \emph{how
-much} capacity pressure a code is under, and \S\ref{sec:mitig} shows it also moves in
-the right direction under intervention---but it does not resolve \emph{which} pairs
+and base rate). The probe, then, is an aggregate dose indicator: it reads \emph{how
+much} capacity pressure a code is under (and \S\ref{sec:mitig} shows it also moves in
+the right direction under intervention), but it does not resolve \emph{which} pairs
 pay for that pressure behaviorally.
 
 \begin{table}[h]\centering\small
@@ -352,7 +352,7 @@ sentiment--gender interference & 0.138 & 0.083 & 0.069 & 0.047 & 0.033 & 0.003 &
 mean off-diagonal interference & 0.166 & 0.122 & 0.055 & 0.045 & 0.028 & 0.017 & $r{=}0.88$ \\
 capacity ratio ($\sum\!\dim\mathcal Q_a/k$) & 0.700 & 0.388 & 0.100 & 0.021 & 0.010 & 0.008 & $r{=}0.89$ \\
 \hline
-leakage logit-shift (5 seeds)  & 1.31 & 0.97 & 0.76 & 0.45 & 0.81 & 0.37 & --- \\
+leakage logit-shift (5 seeds)  & 1.31 & 0.97 & 0.76 & 0.45 & 0.81 & 0.37 & n/a \\
 \end{tabular}
 \caption{Superposition measured in code space with the Manifold
 Probe~\cite{manifold2026} ($N{=}1500$, five seeds), all six code sizes. Every measure
@@ -379,13 +379,13 @@ three distinct ways as $\lambda$ grows (Table~\ref{tab:mitig}).
 measures and nothing else: the trained difference-of-means cosine falls
 ($\cos^2\approx0.13\!\to\!0.05$), yet the probed sentiment--gender subspace
 interference \emph{triples} (0.069$\to$0.208), mean interference over all pairs more
-than doubles (0.055$\to$0.133), and behavioral leakage rises broadly---the targeted
+than doubles (0.055$\to$0.133), and behavioral leakage rises broadly: the targeted
 sentiment$\to$gender pair climbs $0.89\!\to\!1.31$ (the earlier single-pair
 protocol reads $0.76\!\to\!1.65$) and the mean over all twelve directed pairs
 $0.66\!\to\!0.90$, with control already degrading ($1.0\!\to\!0.77$). Squeezing the
 one measured axis pair pushes the attributes into \emph{other} shared directions that
 the probe sees and the trained metric does not. Notably, probe interference and
-leakage move \emph{together} under this intervention---the aggregate-thermometer
+leakage move \emph{together} under this intervention: the aggregate-thermometer
 reading of \S\ref{sec:superpos} survives an intervention even though pair-level
 ranking does not.
 
@@ -394,7 +394,7 @@ three to six orders of magnitude): $\lambda{=}1$ at $\sim$ep~57, $\lambda{=}3$ a
 ep~39--45 depending on seed, $\lambda{=}10$ at $\sim$ep~45.
 
 \emph{Steerability collapse at high $\lambda$.} One $\lambda{=}3$ seed survives all
-60 epochs, and $\lambda{=}10$ reaches epoch 44 before diverging---and these two runs
+60 epochs, and $\lambda{=}10$ reaches epoch 44 before diverging, and these two runs
 expose the third failure mode. $\lambda{=}10$ even achieves the nominal goal: probed
 interference drops \emph{below} baseline (0.039 vs.\ 0.069). But steering the code of
 either model does nothing: on-target control is $0.00$ and AUC is $0.5$ on all twelve
@@ -407,14 +407,14 @@ Across the sweep there is no setting that reduces leakage: the regularizer eithe
 reroutes the entanglement ($\lambda{=}1$), destroys training, or disconnects the
 code from generation ($\lambda{\geq}3$). We read this as evidence that the
 entanglement is intrinsic to conditioning on a low-rank code rather than a removable
-artifact of the readout axes---so a remedy would have to act on the generation
+artifact of the readout axes, so a remedy would have to act on the generation
 pathway (e.g.\ an adversary on the decoder output), which we leave to future work.
 
 \begin{table}[h]\centering\small
 \begin{tabular}{l ccccc}
 $\lambda_{\mathrm{dec}}$ & 0 (baseline) & 1 (ep 56) & 3 (ep 38) & 3 (rerun, ep 60) & 10 (ep 44) \\
 \hline
-trained code-axis $\cos^2$        & $\sim$0.07 & $0.13\!\to\!0.05$ & --- & --- & --- \\
+trained code-axis $\cos^2$        & $\sim$0.07 & $0.13\!\to\!0.05$ & n/a & n/a & n/a \\
 probed s--g interference          & 0.069 & \textbf{0.208} & 0.059 & 0.119 & \textbf{0.039} \\
 leakage s$\to$g (logit-shift)     & 0.89  & \textbf{1.31} & 0.50 & 0.00$^{*}$ & 0.00$^{*}$ \\
 mean leakage, 12 directed pairs   & 0.66  & \textbf{0.90} & 0.56 & 0.00$^{*}$ & 0.00$^{*}$ \\
@@ -425,10 +425,10 @@ training                          & stable & div.\ $\sim$ep57 & div.\ ep39--45 &
 checkpoint (column headers). Three failure modes: $\lambda{=}1$ lowers the trained
 cosine while \emph{raising} probed interference and leakage across pairs (metric
 gaming); all runs tend to diverge; and the two runs reaching high effective penalty
-($\lambda{=}3$ rerun, $\lambda{=}10$) are unsteerable---control $0.00$, AUC $0.5$ on
+($\lambda{=}3$ rerun, $\lambda{=}10$) are unsteerable: control $0.00$, AUC $0.5$ on
 all twelve pairs ($^{*}$leakage is trivially zero because steering has no effect at
 all), even though the probe still finds attribute structure in their codes.
-$\lambda{=}10$ pushes interference below baseline---the nominal goal---at the cost of
+$\lambda{=}10$ pushes interference below baseline, the nominal goal, at the cost of
 the conditioning pathway itself.}
 \label{tab:mitig}
 \end{table}
@@ -437,8 +437,8 @@ the conditioning pathway itself.}
 \label{sec:rho}
 The account so far has treated attribute correlation in the data as a precondition:
 correlated attributes, forced into a small code, come to share directions. TinyStories
-gives this assumption little to work with---the lexicon-labeled sentiment--gender
-association in our corpus is weak ($\phi\approx0.03$--$0.10$)---so we test it
+gives this assumption little to work with (the lexicon-labeled sentiment--gender
+association in our corpus is weak, $\phi\approx0.03$--$0.10$), so we test it
 causally. We re-generate the 50k-story training set by quota sampling from the full
 corpus, holding each attribute's marginal frequency at its natural value while
 setting the sentiment--gender association to
@@ -452,7 +452,7 @@ Neither measured superposition nor leakage responds to the manipulation
 sentiment--gender interference is non-monotone in $\phi$ with its \emph{minimum} at
 $\phi{=}+0.15$ ($0.034\!\pm\!.002$, below the $\phi{=}0$ control's
 $0.047\!\pm\!.023$), and directed leakage is likewise non-monotone with its
-\emph{maximum} at $\phi{=}-0.30$ and minimum at $\phi{=}+0.30$---directionally
+\emph{maximum} at $\phi{=}-0.30$ and minimum at $\phi{=}+0.30$, directionally
 opposite to the hypothesis; at $k{=}16$ the $\phi{=}+0.30$ model is, if anything,
 lower than its $\phi{=}0$ control on both measures. Within-condition seed spread
 (half-ranges up to $\pm0.035$ in interference, $\pm0.20$ in leakage) is as large as
@@ -472,14 +472,14 @@ $k{=}64$ & s--g interference        & $.064\!\pm\!.017$ & $.047\!\pm\!.023$ & $.
          & leak s$\to$g             & $0.79\!\pm\!.19$ & $0.52\!\pm\!.11$ & $0.72\!\pm\!.15$ & $0.45\!\pm\!.02$ \\
          & leak g$\to$s             & $0.57\!\pm\!.20$ & $0.37\!\pm\!.02$ & $0.47\!\pm\!.06$ & $0.43\!\pm\!.07$ \\
 \hline
-$k{=}16$ & s--g interference        & --- & 0.058 & --- & 0.036 \\
-         & leak s$\to$g / g$\to$s   & --- & 0.86 / 0.30 & --- & 0.42 / 0.40 \\
+$k{=}16$ & s--g interference        & n/a & 0.058 & n/a & 0.036 \\
+         & leak s$\to$g / g$\to$s   & n/a & 0.86 / 0.30 & n/a & 0.42 / 0.40 \\
 \end{tabular}
 \caption{Retraining on quota-sampled corpora with the sentiment--gender association
 $\phi$ set at fixed marginals (directed-pair protocol, five evaluation seeds).
 $k{=}64$ cells: mean $\pm$ half-range over \emph{two model seeds}; $k{=}16$: one
-model seed. No dose-response in either interference or leakage at either $k$---the
-leakage extremes even sit opposite to the hypothesis---while the capacity effect
+model seed. No dose-response in either interference or leakage at either $k$ (the
+leakage extremes even sit opposite to the hypothesis), while the capacity effect
 ($k{=}64$ vs.\ $k{=}16$ at $\phi{=}0$) reproduces within the controlled pipeline.}
 \label{tab:rho}
 \end{table}
@@ -500,7 +500,7 @@ more disentangled control, we find a low-rank conditioning code induces attribut
 superposition and worse linear separability than full-rank conditioning, while
 retaining single-factor controllability down to moderate $k$ (control survives until
 the extreme $k{=}8$ bottleneck, where it collapses together with leakage). The
-directly measured superposition is the robust core of the result---strictly monotone
+directly measured superposition is the robust core of the result: strictly monotone
 in $1/k$ across six code sizes and five seeds, co-varying with leakage at $r{=}0.90$.
 The behavioral leakage corroborates this in the mean but is noisier and exposes two
 informative departures (capacity collapse at $k{=}8$, parametrization offset at
@@ -509,9 +509,9 @@ $k{=}d$).
 The two interventions and the pair-level analysis then fix the interpretation. The
 probe--leakage correlation is a \emph{between-model} regularity: within a model,
 interference does not pick out which attribute pairs leak (\S\ref{sec:superpos}), so
-the probe should be read as a thermometer for aggregate capacity pressure---a reading
+the probe should be read as a thermometer for aggregate capacity pressure (a reading
 that even survives intervention, rising together with leakage under the $\lambda{=}1$
-regularizer---rather than as a circuit-level map from shared subspaces to behavioral
+regularizer) rather than as a circuit-level map from shared subspaces to behavioral
 leakage. The decorrelation sweep shows the geometry is not the lever: penalizing the
 measured axes reroutes entanglement into unmeasured directions, then destroys
 training, then disconnects the code from generation altogether (\S\ref{sec:mitig}).
