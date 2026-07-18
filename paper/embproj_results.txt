@@ -1,0 +1,13 @@
+== inference-time embedding-space decontamination (all treated runs 2026-07-17) ==
+   control = original pairs_*.json; protocol rerun noise = 0.004 (12-pair mean |diff|)
+     k8:  s->g 1.666 -> 1.685 (+1%)   mean12 1.029 -> 1.029 (-0%)
+    k16:  s->g 0.504 -> 0.476 (-5%)   mean12 0.595 -> 0.601 (+1%)
+    k64:  s->g 0.892 -> 0.919 (+3%)   mean12 0.661 -> 0.660 (-0%)
+   k256:  s->g 0.772 -> 0.710 (-8%)   mean12 0.660 -> 0.641 (-3%)
+   k512:  s->g 0.727 -> 0.719 (-1%)   mean12 0.620 -> 0.619 (-0%)
+     m1:  s->g 0.499 -> 0.501 (+0%)   mean12 0.392 -> 0.395 (+1%)
+   dec1:  s->g 1.312 -> 1.307 (-0%)   mean12 0.904 -> 0.884 (-2%)
+
+projected fraction |P^T delta|/|delta| (sentiment source, k=64): 0.0366
+=> injected conditioning delta carries ~4% linearly readable off-target content;
+   leak is manufactured inside the denoiser's conditional response.

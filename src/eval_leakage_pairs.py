@@ -94,6 +94,10 @@ def parse_args():
                    help="Bootstrap axes/classifiers + vary generation RNG over this many seeds.")
     p.add_argument("--sources", type=str, default=",".join(ATTRS),
                    help="Comma list of source attributes to steer.")
+    p.add_argument("--emb-project", choices=["none", "offtargets"], default="none",
+                   help="project the injected embedding-space steering delta off the "
+                        "off-target attributes' classifier directions (inference-time "
+                        "generation-pathway decontamination)")
     p.add_argument("--out", type=str, default="",
                    help="Optional path to dump per-pair results as JSON.")
     p.add_argument("--config_override", action="append", default=[])
@@ -201,7 +205,7 @@ def main():
     results = {(a, b): [] for a in sources for b in ATTRS if b != a}
     ctrl = {a: [] for a in sources}
     log_for_0(f"k={cfg.manifold_dim} codes {mu.shape} | sources={sources} | {nseeds} seeds "
-              f"(decontaminated vs ALL other attribute axes)")
+              f"(decontaminated vs ALL other attribute axes; emb_project={args.emb_project})")
 
     for si in range(nseeds):
         idx = boot.integers(0, len(mu), size=len(mu)) if nseeds > 1 else np.arange(len(mu))
@@ -224,6 +228,16 @@ def main():
                 log_for_0(f"  seed {si}: '{src}' axis vanished under decontamination, skipping")
                 continue
 
+            # generation-pathway decontamination: orthonormal basis of the
+            # off-target classifier directions in embedding space
+            Pq = None
+            if args.emb_project == "offtargets":
+                dirs = [clfs[b][0] for b in ATTRS if b != src and b in clfs]
+                if dirs:
+                    D = np.stack([v / (np.linalg.norm(v) + 1e-8) for v in dirs], axis=1)
+                    Pq, _ = np.linalg.qr(D)
+            phi0 = (c0.astype(np.float32) @ U) if is_m2 else c0.astype(np.float32)
+
             per_alpha_logit = {b: [] for b in ATTRS if b != src}
             all_logit = {b: [] for b in ATTRS if b != src}
             per_alpha_src = []
@@ -231,6 +245,14 @@ def main():
             for a in alphas:
                 c = (c0 + a * u).astype(np.float32)
                 phi_vec = (c @ U) if is_m2 else c
+                if Pq is not None:
+                    delta = phi_vec - phi0
+                    dn = float(np.linalg.norm(delta))
+                    pn = float(np.linalg.norm(Pq.T @ delta))
+                    if abs(a - amax) < 1e-9:
+                        print(f"EMBPROJ_FRACTION src={src} ratio={pn/max(dn,1e-9):.4f} "
+                              f"norm={dn:.3f}", flush=True)
+                    phi_vec = phi0 + delta - Pq @ (Pq.T @ delta)
                 phi_lift = jnp.asarray(np.repeat(phi_vec[None, :], M, axis=0))
                 rng, nrng, trng = jax.random.split(rng, 3)
                 z = jax.random.normal(nrng, (M, L, d)) * cfg.denoiser_noise_scale
@@ -277,7 +299,8 @@ def main():
     print(f"DIRECTED-PAIR LEAKAGE  k={k}  N={mu.shape[0]} M={M} seeds={nseeds}")
     print("=" * 78)
     print(f"{'pair (src->tgt)':<24} {'logit_shift':>16} {'AUC':>12} {'src ctrl':>14}")
-    out = {"k": int(k), "seeds": nseeds, "pairs": {}, "ctrl": {}}
+    out = {"k": int(k), "seeds": nseeds, "emb_project": args.emb_project,
+           "pairs": {}, "ctrl": {}}
     for src in sources:
         carr = np.array(ctrl[src]) if ctrl[src] else np.array([np.nan])
         out["ctrl"][src] = [float(carr.mean()), float(carr.std())]

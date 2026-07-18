@@ -44,16 +44,20 @@ which attribute pairs leak (mean within-model Spearman $-0.53$ over twelve direc
 pairs); which pairs leak is set instead by the fragility of the target attribute,
 with token-local attributes (gender, animal) absorbing the leakage that globally
 distributed ones (tone, length) resist. The probe thus reads as an aggregate symptom
-of capacity pressure rather than a pair-level router. Two interventions sharpen this reading. Decorrelating the code
+of capacity pressure rather than a pair-level router. Three interventions sharpen this reading. Decorrelating the code
 axes during training fails three different ways as the penalty grows: it games the
 trained metric (the code-axis cosine falls while probed subspace interference triples
 and leakage rises across pairs), destabilizes the flow objective, and at high penalty
-produces models whose conditioning no longer steers generation at all. And
-manipulating the \emph{data} (retraining on corpora whose sentiment--gender
+produces models whose conditioning no longer steers generation at all. Manipulating
+the \emph{data} (retraining on corpora whose sentiment--gender
 correlation is set to $\phi\in\{-0.3,0,+0.15,+0.3\}$ at fixed marginals) changes
-neither measured superposition nor leakage, at either $k{=}64$ or $k{=}16$: the
-entanglement is driven by the capacity of the bottleneck, not by correlations in the
-training data or the readout geometry. Our results connect controllable generation to
+neither measured superposition nor leakage, at either $k{=}64$ or $k{=}16$. And
+projecting the injected conditioning vector off every off-target attribute direction
+at inference changes nothing in any of seven models, because that vector already
+carries almost no linearly readable off-target content: the leakage is manufactured
+inside the denoiser's conditional response. The entanglement is thus driven by the
+capacity of the bottleneck and realized downstream in the generation pathway, not by
+correlations in the training data or the readout geometry. Our results connect controllable generation to
 representational superposition and caution against compact semantic bottlenecks as a
 disentanglement device.
 \end{abstract}
@@ -102,11 +106,14 @@ seeds, six code sizes; the study's most robust trend) and tracks the multi-seed
 off-target leakage at $r{=}0.90$ across code sizes; a twelve-directed-pair analysis
 shows this relation is \emph{between}-model only, as within a fixed model
 interference does not rank which pairs leak (\S\ref{sec:superpos}).
-(iv) Evidence the entanglement is \emph{intrinsic}: a decorrelation regularizer
-swept over $\lambda\in\{1,3,10\}$ fails in three distinct ways: metric gaming (the
-trained cosine falls while probed interference triples and leakage rises), training
-divergence, and, at high $\lambda$, total loss of steerability. Any remedy must
-therefore act on the generation pathway, not code geometry (\S\ref{sec:mitig}).
+(iv) Evidence the entanglement is \emph{intrinsic} and localized in the generation
+pathway: a decorrelation regularizer swept over $\lambda\in\{1,3,10\}$ fails in
+three distinct ways (metric gaming, training divergence, and, at high $\lambda$,
+total loss of steerability), and an inference-time projection of the injected
+conditioning vector off all off-target attribute directions changes leakage in none
+of seven models, because that vector already carries almost no linearly readable
+off-target content: the leak is manufactured inside the denoiser's conditional
+response (\S\ref{sec:mitig}).
 (v) A causal test of the data-side driver: retraining with the sentiment--gender
 correlation set to $\phi\in\{-0.3,0,+0.15,+0.3\}$ at fixed marginals leaves both
 superposition and leakage unchanged at $k{=}64$ and $k{=}16$: capacity pressure, not
@@ -424,10 +431,52 @@ degraded at these checkpoints; either way the models are useless for control.)
 
 Across the sweep there is no setting that reduces leakage: the regularizer either
 reroutes the entanglement ($\lambda{=}1$), destroys training, or disconnects the
-code from generation ($\lambda{\geq}3$). We read this as evidence that the
-entanglement is intrinsic to conditioning on a low-rank code rather than a removable
-artifact of the readout axes, so a remedy would have to act on the generation
-pathway (e.g.\ an adversary on the decoder output), which we leave to future work.
+code from generation ($\lambda{\geq}3$). The entanglement is intrinsic to
+conditioning on a low-rank code rather than a removable artifact of the readout
+axes.
+
+\paragraph{Inference-time surgery on the conditioning vector also fails, completing
+the localization.} If the leaked content rode into generation on the conditioning
+vector itself, it could be removed at inference: steer in code space as usual, but
+project the injected embedding-space delta $\Delta\phib=U(\alpha\bm u_\perp)$ off
+the span of the off-target attributes' embedding classifier directions before
+conditioning the denoiser. We ran the full directed-pair protocol under this
+intervention for all six code sizes and the $\lambda{=}1$ model
+(Table~\ref{tab:embproj}). It changes nothing: across seven models the targeted
+sentiment$\to$gender leakage moves by at most $8\%$ and the twelve-pair mean by at
+most $3\%$, while an identical-protocol rerun of the untreated baseline reproduces
+the original numbers to a mean absolute difference of $0.004$, so these are precise
+nulls, not noisy ones. The reason is itself diagnostic: the injected delta is
+\emph{already} nearly orthogonal to the off-target directions (the projection
+removes $3.7\%$ of its norm for the sentiment source at $k{=}64$). There is no
+linearly readable off-target content in the conditioning signal to remove; the
+off-target drift is manufactured \emph{downstream}, by the denoiser's learned
+response to the on-target component itself.
+
+Taken together, the interventions bracket the leak precisely. It survives
+decontamination of the code axis, decorrelation during training, decorrelation of
+the data (\S\ref{sec:rho}), and decontamination of the injected conditioning
+vector. What remains is the denoiser's conditional response, so a remedy would have
+to retrain the generation pathway itself (e.g.\ an adversary on the decoder
+output), which we leave to future work.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l ccccccc}
+& $k{=}8$ & $k{=}16$ & $k{=}64$ & $k{=}256$ & $k{=}512$ & M1 & $\lambda{=}1$ \\
+\hline
+leak s$\to$g, standard        & 1.67 & 0.50 & 0.89 & 0.77 & 0.73 & 0.50 & 1.31 \\
+leak s$\to$g, projected       & 1.68 & 0.48 & 0.92 & 0.71 & 0.72 & 0.50 & 1.31 \\
+mean 12 pairs, standard       & 1.03 & 0.59 & 0.66 & 0.66 & 0.62 & 0.39 & 0.90 \\
+mean 12 pairs, projected      & 1.03 & 0.60 & 0.66 & 0.64 & 0.62 & 0.39 & 0.88 \\
+\end{tabular}
+\caption{Inference-time decontamination of the conditioning vector: the injected
+embedding delta is projected off all off-target classifier directions before
+generation (directed-pair protocol, five evaluation seeds). Leakage is unchanged in
+every model (protocol rerun noise: $0.004$): the conditioning vector carries
+essentially no linearly readable off-target content ($3.7\%$ of the delta's norm),
+so the leak must arise inside the denoiser's conditional response.}
+\label{tab:embproj}
+\end{table}
 
 \begin{table}[h]\centering\small
 \begin{tabular}{l ccccc}
@@ -535,7 +584,9 @@ that even survives intervention, rising together with leakage under the $\lambda
 regularizer) rather than as a circuit-level map from shared subspaces to behavioral
 leakage. The decorrelation sweep shows the geometry is not the lever: penalizing the
 measured axes reroutes entanglement into unmeasured directions, then destroys
-training, then disconnects the code from generation altogether (\S\ref{sec:mitig}).
+training, then disconnects the code from generation altogether; and inference-time
+removal of linearly readable off-target content from the conditioning vector changes
+nothing, because there is essentially none to remove (\S\ref{sec:mitig}).
 And the $\phi$-controlled retraining shows the data are not the lever either: forcing
 the attribute correlation across $[-0.3,+0.3]$ moves neither superposition nor
 leakage, at low or high capacity pressure (\S\ref{sec:rho}). What remains, and what
@@ -549,7 +600,9 @@ and~\ref{tab:superpos} remains one model per $k$, so adjacent-$k$ separation sti
 rests on eval-seed error bars. The within-model pair analysis covers four attributes (twelve directed
 pairs) in one corpus; the steerability collapse at high $\lambda$ has not been
 distinguished from generation-quality collapse. The study is on TinyStories with
-lexicon labels throughout. A generation-pathway mitigation remains open. We view the
+lexicon labels throughout. A \emph{training-time} generation-pathway mitigation
+(e.g.\ an adversary on the decoder output) remains open; our inference-time result
+rules out only linear surgery on the conditioning vector. We view the
 contribution as reframing this conditioning design from a controllability method
 toward a study of how the geometry of the conditioning variable relates to
 disentanglement, connecting controllable generation to the superposition phenomenon

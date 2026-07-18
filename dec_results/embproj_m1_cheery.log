@@ -1,0 +1,33 @@
+WARNING:absl:Tensorflow library not found, tensorflow.io.gfile operations will use native shim calls. GCS paths (i.e. 'gs://...') cannot be accessed.
+2026-07-17 01:25:49.419074: W external/xla/xla/service/gpu/nvptx_compiler.cc:742] The NVIDIA driver's CUDA version is 12.8 which is older than the ptxas CUDA version (12.9.86). Because the driver is older than the ptxas version, XLA is disabling parallel compilation, which may slow down compilation. You should update your NVIDIA driver or use the NVIDIA-provided CUDA forward compatibility packages.
+WARNING:absl:The transformations API will eventually be replaced by an upgraded design. The current API will not be removed until this point, but it will no longer be actively worked on.
+
+==============================================================================
+DIRECTED-PAIR LEAKAGE  k=0  N=400 M=24 seeds=5
+==============================================================================
+pair (src->tgt)               logit_shift          AUC       src ctrl
+sentiment->gender           0.501+-0.213         0.800    1.000+-0.000
+LEAKPAIR_SUMMARY k=0 pair=sentiment->gender logit_shift=0.501+-0.213 auc=0.800 ctrl=1.000+-0.000
+sentiment->animal           0.255+-0.056         0.752    1.000+-0.000
+LEAKPAIR_SUMMARY k=0 pair=sentiment->animal logit_shift=0.255+-0.056 auc=0.752 ctrl=1.000+-0.000
+sentiment->length           0.253+-0.066         0.772    1.000+-0.000
+LEAKPAIR_SUMMARY k=0 pair=sentiment->length logit_shift=0.253+-0.066 auc=0.772 ctrl=1.000+-0.000
+gender->sentiment           0.487+-0.173         0.941    1.000+-0.000
+LEAKPAIR_SUMMARY k=0 pair=gender->sentiment logit_shift=0.487+-0.173 auc=0.941 ctrl=1.000+-0.000
+gender->animal              0.372+-0.066         0.875    1.000+-0.000
+LEAKPAIR_SUMMARY k=0 pair=gender->animal logit_shift=0.372+-0.066 auc=0.875 ctrl=1.000+-0.000
+gender->length              0.481+-0.074         0.982    1.000+-0.000
+LEAKPAIR_SUMMARY k=0 pair=gender->length logit_shift=0.481+-0.074 auc=0.982 ctrl=1.000+-0.000
+animal->sentiment           0.192+-0.083         0.701    1.000+-0.000
+LEAKPAIR_SUMMARY k=0 pair=animal->sentiment logit_shift=0.192+-0.083 auc=0.701 ctrl=1.000+-0.000
+animal->gender              0.575+-0.103         0.969    1.000+-0.000
+LEAKPAIR_SUMMARY k=0 pair=animal->gender logit_shift=0.575+-0.103 auc=0.969 ctrl=1.000+-0.000
+animal->length              0.296+-0.207         0.791    1.000+-0.000
+LEAKPAIR_SUMMARY k=0 pair=animal->length logit_shift=0.296+-0.207 auc=0.791 ctrl=1.000+-0.000
+length->sentiment           0.282+-0.100         0.810    0.184+-0.190
+LEAKPAIR_SUMMARY k=0 pair=length->sentiment logit_shift=0.282+-0.100 auc=0.810 ctrl=0.184+-0.190
+length->gender              0.616+-0.196         0.838    0.184+-0.190
+LEAKPAIR_SUMMARY k=0 pair=length->gender logit_shift=0.616+-0.196 auc=0.838 ctrl=0.184+-0.190
+length->animal              0.431+-0.098         0.721    0.184+-0.190
+LEAKPAIR_SUMMARY k=0 pair=length->animal logit_shift=0.431+-0.098 auc=0.721 ctrl=0.184+-0.190
+==============================================================================

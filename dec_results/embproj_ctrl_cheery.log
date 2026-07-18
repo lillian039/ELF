@@ -1,0 +1,40 @@
+WARNING:absl:Tensorflow library not found, tensorflow.io.gfile operations will use native shim calls. GCS paths (i.e. 'gs://...') cannot be accessed.
+2026-07-17 01:23:35.204452: W external/xla/xla/service/gpu/nvptx_compiler.cc:742] The NVIDIA driver's CUDA version is 12.8 which is older than the ptxas CUDA version (12.9.86). Because the driver is older than the ptxas version, XLA is disabling parallel compilation, which may slow down compilation. You should update your NVIDIA driver or use the NVIDIA-provided CUDA forward compatibility packages.
+WARNING:absl:The transformations API will eventually be replaced by an upgraded design. The current API will not be removed until this point, but it will no longer be actively worked on.
+
+==============================================================================
+DIRECTED-PAIR LEAKAGE  k=64  N=400 M=24 seeds=5
+==============================================================================
+pair (src->tgt)               logit_shift          AUC       src ctrl
+sentiment->gender           0.890+-0.117         0.950    0.983+-0.033
+LEAKPAIR_SUMMARY k=64 pair=sentiment->gender logit_shift=0.890+-0.117 auc=0.950 ctrl=0.983+-0.033
+sentiment->animal           1.121+-0.140         1.000    0.983+-0.033
+LEAKPAIR_SUMMARY k=64 pair=sentiment->animal logit_shift=1.121+-0.140 auc=1.000 ctrl=0.983+-0.033
+sentiment->length           0.503+-0.138         0.919    0.983+-0.033
+LEAKPAIR_SUMMARY k=64 pair=sentiment->length logit_shift=0.503+-0.138 auc=0.919 ctrl=0.983+-0.033
+gender->sentiment           0.261+-0.057         0.643    1.000+-0.000
+LEAKPAIR_SUMMARY k=64 pair=gender->sentiment logit_shift=0.261+-0.057 auc=0.643 ctrl=1.000+-0.000
+gender->animal              0.899+-0.221         0.865    1.000+-0.000
+LEAKPAIR_SUMMARY k=64 pair=gender->animal logit_shift=0.899+-0.221 auc=0.865 ctrl=1.000+-0.000
+gender->length              0.512+-0.285         0.920    1.000+-0.000
+LEAKPAIR_SUMMARY k=64 pair=gender->length logit_shift=0.512+-0.285 auc=0.920 ctrl=1.000+-0.000
+animal->sentiment           0.286+-0.138         0.694    1.000+-0.000
+LEAKPAIR_SUMMARY k=64 pair=animal->sentiment logit_shift=0.286+-0.138 auc=0.694 ctrl=1.000+-0.000
+animal->gender              0.387+-0.122         0.729    1.000+-0.000
+LEAKPAIR_SUMMARY k=64 pair=animal->gender logit_shift=0.387+-0.122 auc=0.729 ctrl=1.000+-0.000
+animal->length              0.554+-0.310         0.901    1.000+-0.000
+LEAKPAIR_SUMMARY k=64 pair=animal->length logit_shift=0.554+-0.310 auc=0.901 ctrl=1.000+-0.000
+length->sentiment           0.432+-0.192         0.764    0.004+-0.174
+LEAKPAIR_SUMMARY k=64 pair=length->sentiment logit_shift=0.432+-0.192 auc=0.764 ctrl=0.004+-0.174
+length->gender              0.883+-0.294         0.855    0.004+-0.174
+LEAKPAIR_SUMMARY k=64 pair=length->gender logit_shift=0.883+-0.294 auc=0.855 ctrl=0.004+-0.174
+length->animal              1.208+-0.356         0.969    0.004+-0.174
+LEAKPAIR_SUMMARY k=64 pair=length->animal logit_shift=1.208+-0.356 auc=0.969 ctrl=0.004+-0.174
+==============================================================================
+Traceback (most recent call last):
+  File "/mnt/faster1/lc2762/ELF/src/eval_leakage_pairs.py", line 325, in <module>
+    main()
+  File "/mnt/faster1/lc2762/ELF/src/eval_leakage_pairs.py", line 319, in main
+    with open(args.out, "w") as f:
+         ^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'dec_results/pairs_k64_ctrlrerun.json'
