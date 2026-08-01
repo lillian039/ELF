@@ -1,0 +1,66 @@
+# SM-ELF M1 (mean-pool phi, full-rank reference) on Bias in Bios.
+# Second-corpus replication: every hyperparameter identical to
+# tinystories_demo/train_tinystories_SM-ELF.yml; ONLY data paths, output_dir
+# and seed handling differ. Do not tune anything here independently of the
+# TinyStories configs, the matched-budget claim depends on it.
+#
+# Seeds: launch seed-1/seed-2 via --config_override "seed=42" / "seed=43"
+# (training seeds; the 5 evaluation seeds live in the eval scripts and are a
+# different thing, see paper/bib_registration.md).
+
+data_path: "bib_demo/data_50k/train"
+eval_data_path: "bib_demo/data_50k/val"
+max_length: 256
+pad_token: eos
+tokenizer_name: "t5-small"
+encoder_model_name: "t5-small"
+encoder_checkpoint: "embedded-language-flows/t5_small_encoder_jax/t5_small_encoder_jax.pkl"
+
+latent_mean: 0.0
+latent_std: 0.2
+
+model: "ELF-B"
+bottleneck_dim: 128
+num_time_tokens: 4
+num_self_cond_cfg_tokens: 4
+num_model_mode_tokens: 4
+
+# --- SM-ELF: semantic-manifold factorization (M1) ---
+semantic_factorization: true
+num_phi_tokens: 4
+manifold_dim: 0          # 0 -> phi is the full masked-mean pool (M1)
+cycle_loss_weight: 0.0
+ib_beta: 0.0
+
+denoiser_p_mean: -1.5
+denoiser_p_std: 0.8
+denoiser_noise_scale: 2.0
+t_eps: 0.05
+time_schedule: "logit_normal"
+
+decoder_prob: 0.2
+decoder_noise_scale: 5.0
+decoder_p_mean: 0.8
+decoder_p_std: 0.8
+
+self_cond_prob: 0.5
+
+optimizer: "adamw"
+global_batch_size: 80
+blr: 0.001
+weight_decay: 0.0
+warmup_steps: 1000
+ema_decay1: 0.9999
+epochs: 60
+
+log_freq: 50
+save_freq: 2
+eval_freq: 0.5
+online_eval: false
+eval_use_ema: false
+
+sampling_configs_path: "src/configs/sampling_configs/uncond_sampling_configs.yml"
+num_samples: 10
+output_dir: "/mnt/faster3/lc2762/elf_bib_m1"
+use_wandb: false
+seed: 42

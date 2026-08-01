@@ -95,6 +95,10 @@ class Config:
     # Semantic-manifold factorization (SM-ELF): x = phi(s) + r, flow on residual r.
     # When False, behaves exactly like vanilla ELF (all phi paths are no-ops).
     semantic_factorization: bool = False
+    phi_route: str = "both"  # Which components receive phi during TRAINING:
+                             # "both" (default, original behavior), "denoiser"
+                             # (decoder head unconditioned), "decoder" (denoiser
+                             # unconditioned). Carrier-routing ablation.
     num_phi_tokens: int = 4       # In-context conditioning tokens carrying phi(s)
     manifold_dim: int = 0         # k; 0 -> phi is the full masked-mean pool (M1).
                                   # >0 -> low-rank bottleneck code c in R^k (M2).
@@ -103,6 +107,15 @@ class Config:
     decorrelation_weight: float = 0.0  # lambda_dec: penalize cos^2 between code-space
                                   # sentiment & gender difference-of-means axes (mitigation).
                                   # >0 requires lexicon labels in the batch.
+    manifold_cf_weight: float = 0.0  # lambda_cf: counterfactual off-target consistency.
+                                  # Second denoiser pass with the code steered along the
+                                  # batch sentiment axis (gender projected out); penalizes
+                                  # movement of the reconstruction's pooled embedding along
+                                  # the frozen gender direction (generation-pathway
+                                  # mitigation). >0 requires M2 + lexicon labels.
+    manifold_cf_alpha_min: float = 1.0  # |alpha| range for the counterfactual steer
+    manifold_cf_alpha_max: float = 3.0
+    manifold_cf_warmup_steps: int = 0  # no CF pressure before this train step
 
     # Training (optimizer + schedule)
     epochs: int = 200

@@ -54,6 +54,34 @@ from eval_leakage_continuous import _auc, _embed_texts, _fit_linear_classifier
 
 ATTRS = ["sentiment", "gender", "animal", "length"]
 
+# --- extra target attributes for the fragility-prediction experiment ---
+# Chosen to span the token-local <-> globally-distributed spectrum; which is
+# which is decided by the independent fragility score (eval_fragility.py), not
+# by fiat. Lexicons avoid overlap with the sentiment lexicons in
+# semantic_utils (no yummy/delicious/cried).
+FOOD_WORDS = set("apple apples cake cakes cookie cookies candy candies chocolate bread "
+                 "milk juice pizza banana bananas pie soup sandwich sandwiches egg eggs "
+                 "cheese berry berries strawberry strawberries cherry honey jam sweets "
+                 "snack snacks lunch dinner breakfast meal carrot carrots corn".split())
+WEATHER_WORDS = set("rain rains rained raining rainy snow snows snowed snowing snowy "
+                    "storm storms stormy wind winds windy cloud clouds cloudy sunny "
+                    "thunder lightning fog foggy rainbow puddle puddles umbrella".split())
+VEHICLE_WORDS = set("car cars truck trucks bus buses train trains boat boats plane "
+                    "planes airplane airplanes bike bikes bicycle bicycles scooter "
+                    "wagon rocket ship ships".split())
+EXTRA_ATTRS = ["food", "weather", "vehicle", "dialogue"]
+
+# Round-2 held-out targets for the natvar x movability prediction (registered
+# before their leakage was measured). Lexicons checked for zero overlap with
+# every other attribute's lexicon (no orange/fish/boat/puddle).
+COLOR_WORDS = set("red blue green yellow pink purple brown white black gray grey "
+                  "golden silver colorful".split())
+PLANT_WORDS = set("tree trees flower flowers garden grass leaf leaves plant plants "
+                  "seed seeds bush bushes branch branches forest woods".split())
+WATER_WORDS = set("water river lake sea ocean pond wave waves swim swims swimming "
+                  "splash splashed wet".split())
+EXTRA2_ATTRS = ["color", "plant", "water", "question"]
+
 
 def _toks(text):
     return [w.strip(".,!?;:\"'").lower() for w in text.split()]
@@ -69,6 +97,22 @@ def attr_value(name, text):
         return 1.0 if any(t in ANIMAL_WORDS for t in _toks(text)) else -1.0
     if name == "length":
         return float(len(_toks(text)))
+    if name == "food":
+        return 1.0 if any(t in FOOD_WORDS for t in _toks(text)) else -1.0
+    if name == "weather":
+        return 1.0 if any(t in WEATHER_WORDS for t in _toks(text)) else -1.0
+    if name == "vehicle":
+        return 1.0 if any(t in VEHICLE_WORDS for t in _toks(text)) else -1.0
+    if name == "dialogue":
+        return 1.0 if '"' in text else -1.0
+    if name == "color":
+        return 1.0 if any(t in COLOR_WORDS for t in _toks(text)) else -1.0
+    if name == "plant":
+        return 1.0 if any(t in PLANT_WORDS for t in _toks(text)) else -1.0
+    if name == "water":
+        return 1.0 if any(t in WATER_WORDS for t in _toks(text)) else -1.0
+    if name == "question":
+        return 1.0 if "?" in text else -1.0
     raise ValueError(name)
 
 
@@ -94,6 +138,15 @@ def parse_args():
                    help="Bootstrap axes/classifiers + vary generation RNG over this many seeds.")
     p.add_argument("--sources", type=str, default=",".join(ATTRS),
                    help="Comma list of source attributes to steer.")
+    p.add_argument("--targets", choices=["core", "extended", "extended2"], default="core",
+                   help="'core' = the original 4 attributes (paper protocol); "
+                        "'extended' additionally scores every generation against "
+                        f"{EXTRA_ATTRS} as leakage targets (same generation cost); "
+                        f"'extended2' further adds {EXTRA2_ATTRS} (round-2 holdout).")
+    p.add_argument("--decon", choices=["all", "core"], default="all",
+                   help="Decontaminate each source axis against ALL other target "
+                        "attributes' axes ('all') or only the core ones ('core', "
+                        "reproduces the paper's source axes under --targets extended).")
     p.add_argument("--emb-project", choices=["none", "offtargets"], default="none",
                    help="project the injected embedding-space steering delta off the "
                         "off-target attributes' classifier directions (inference-time "
@@ -133,7 +186,11 @@ def main():
     is_m2 = cfg.manifold_dim > 0
     alphas = [float(a) for a in args.alphas.split(",")]
     sources = [s for s in args.sources.split(",") if s]
-    assert all(s in ATTRS for s in sources), f"sources must be among {ATTRS}"
+    targets = {"core": list(ATTRS),
+               "extended": ATTRS + EXTRA_ATTRS,
+               "extended2": ATTRS + EXTRA_ATTRS + EXTRA2_ATTRS}[args.targets]
+    decon_set = targets if args.decon == "all" else list(ATTRS)
+    assert all(s in targets for s in sources), f"sources must be among {targets}"
     sc = cfg.sampling_configs[0]
     steps = sc.num_sampling_steps[0] if isinstance(sc.num_sampling_steps, list) else sc.num_sampling_steps
     sccfg = sc.self_cond_cfg_scales[0] if isinstance(sc.self_cond_cfg_scales, list) else sc.self_cond_cfg_scales
@@ -193,8 +250,11 @@ def main():
             mus.append(np.asarray(pooled))
     mu = np.concatenate(mus, axis=0)
     pooled_emb = np.concatenate(pools, axis=0)
-    labels = {a: np.array([attr_value(a, t) for t in texts]) for a in ATTRS}
+    labels = {a: np.array([attr_value(a, t) for t in texts]) for a in targets}
     len_std = labels["length"].std() + 1e-8  # to normalize on-target length control
+    for a in targets:
+        pos, neg = pos_neg_masks(a, labels[a])
+        log_for_0(f"  label balance {a}: +{int(pos.sum())} / -{int(neg.sum())} of {N}")
 
     M = args.samples_per_alpha
     amin, amax = min(alphas), max(alphas)
@@ -202,20 +262,21 @@ def main():
     boot = np.random.default_rng(args.seed)
     base_rng = jax.random.PRNGKey(args.seed)
     # results[(src, tgt)] = list over seeds of (logit_shift, auc); ctrl[src] = list of deltas
-    results = {(a, b): [] for a in sources for b in ATTRS if b != a}
+    results = {(a, b): [] for a in sources for b in targets if b != a}
     ctrl = {a: [] for a in sources}
-    log_for_0(f"k={cfg.manifold_dim} codes {mu.shape} | sources={sources} | {nseeds} seeds "
-              f"(decontaminated vs ALL other attribute axes; emb_project={args.emb_project})")
+    log_for_0(f"k={cfg.manifold_dim} codes {mu.shape} | sources={sources} | "
+              f"targets={targets} | {nseeds} seeds "
+              f"(decontaminated vs {args.decon}; emb_project={args.emb_project})")
 
     for si in range(nseeds):
         idx = boot.integers(0, len(mu), size=len(mu)) if nseeds > 1 else np.arange(len(mu))
         mu_s, emb_s = mu[idx], pooled_emb[idx]
-        lab_s = {a: labels[a][idx] for a in ATTRS}
-        masks = {a: pos_neg_masks(a, lab_s[a]) for a in ATTRS}
-        axes = {a: fit_axis(mu_s, *masks[a]) for a in ATTRS}
+        lab_s = {a: labels[a][idx] for a in targets}
+        masks = {a: pos_neg_masks(a, lab_s[a]) for a in targets}
+        axes = {a: fit_axis(mu_s, *masks[a]) for a in targets}
         clfs = {a: _fit_linear_classifier(emb_s[masks[a][0] | masks[a][1]],
                                           np.where(masks[a][0], 1, -1)[masks[a][0] | masks[a][1]])
-                for a in ATTRS if masks[a][0].sum() > 0 and masks[a][1].sum() > 0}
+                for a in targets if masks[a][0].sum() > 0 and masks[a][1].sum() > 0}
         c0 = mu_s.mean(0)
         rng = jax.random.fold_in(base_rng, si)
 
@@ -223,7 +284,7 @@ def main():
             if axes[src] is None:
                 log_for_0(f"  seed {si}: no axis for source '{src}' (empty class), skipping")
                 continue
-            u = decontaminate(axes[src], [axes[b] for b in ATTRS if b != src])
+            u = decontaminate(axes[src], [axes[b] for b in decon_set if b != src])
             if u is None:
                 log_for_0(f"  seed {si}: '{src}' axis vanished under decontamination, skipping")
                 continue
@@ -232,14 +293,14 @@ def main():
             # off-target classifier directions in embedding space
             Pq = None
             if args.emb_project == "offtargets":
-                dirs = [clfs[b][0] for b in ATTRS if b != src and b in clfs]
+                dirs = [clfs[b][0] for b in targets if b != src and b in clfs]
                 if dirs:
                     D = np.stack([v / (np.linalg.norm(v) + 1e-8) for v in dirs], axis=1)
                     Pq, _ = np.linalg.qr(D)
             phi0 = (c0.astype(np.float32) @ U) if is_m2 else c0.astype(np.float32)
 
-            per_alpha_logit = {b: [] for b in ATTRS if b != src}
-            all_logit = {b: [] for b in ATTRS if b != src}
+            per_alpha_logit = {b: [] for b in targets if b != src}
+            all_logit = {b: [] for b in targets if b != src}
             per_alpha_src = []
             all_alpha = []
             for a in alphas:
@@ -254,6 +315,11 @@ def main():
                               f"norm={dn:.3f}", flush=True)
                     phi_vec = phi0 + delta - Pq @ (Pq.T @ delta)
                 phi_lift = jnp.asarray(np.repeat(phi_vec[None, :], M, axis=0))
+                # routing-ablated models saw phi at only one component during
+                # training; condition each component at eval exactly as trained
+                route = getattr(cfg, "phi_route", "both")
+                phi_gen = phi_lift if route in ("both", "denoiser") else None
+                phi_dec = phi_lift if route in ("both", "decoder") else None
                 rng, nrng, trng = jax.random.split(rng, 3)
                 z = jax.random.normal(nrng, (M, L, d)) * cfg.denoiser_noise_scale
                 t_steps = get_sampling_steps(trng, n_steps=steps, time_schedule=sc.time_schedule,
@@ -261,11 +327,11 @@ def main():
                 latent = _generate_samples_single_batch(
                     model_params=m0_params, model_apply_fn=m0.apply, rng=nrng,
                     z=z, t_steps=t_steps, cond_seq=None, cond_seq_mask=None,
-                    config=cfg, sampling_config=sc, cfg_scale=1.0, self_cond_cfg_scale=sccfg, phi=phi_lift,
+                    config=cfg, sampling_config=sc, cfg_scale=1.0, self_cond_cfg_scale=sccfg, phi=phi_gen,
                 )
                 pred = np.asarray(mask_after_eos(_dlm_decode_batch(
                     z=latent, model_params=m0_params, model_apply_fn=m0.apply,
-                    t_final_val=float(t_steps[-1]), config=cfg, self_cond_cfg_scale=sccfg, phi=phi_lift,
+                    t_final_val=float(t_steps[-1]), config=cfg, self_cond_cfg_scale=sccfg, phi=phi_dec,
                 ), eos_id, pad_id))
                 gtexts = [tok.decode(pred[m], skip_special_tokens=True) for m in range(M)]
                 emb_gen = _embed_texts(gtexts, tok, L, pad_id, enc_model, enc_params, cfg)
@@ -300,11 +366,11 @@ def main():
     print("=" * 78)
     print(f"{'pair (src->tgt)':<24} {'logit_shift':>16} {'AUC':>12} {'src ctrl':>14}")
     out = {"k": int(k), "seeds": nseeds, "emb_project": args.emb_project,
-           "pairs": {}, "ctrl": {}}
+           "targets": targets, "decon": args.decon, "pairs": {}, "ctrl": {}}
     for src in sources:
         carr = np.array(ctrl[src]) if ctrl[src] else np.array([np.nan])
         out["ctrl"][src] = [float(carr.mean()), float(carr.std())]
-        for tgt in ATTRS:
+        for tgt in targets:
             if tgt == src or not results[(src, tgt)]:
                 continue
             arr = np.array(results[(src, tgt)])  # (seeds, 2)

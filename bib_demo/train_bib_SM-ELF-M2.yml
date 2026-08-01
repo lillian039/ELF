@@ -1,0 +1,70 @@
+# SM-ELF M2 (low-rank manifold code + cycle + IB) on Bias in Bios.
+# Second-corpus replication base config: identical to
+# tinystories_demo/train_tinystories_SM-ELF-M2.yml apart from data paths and
+# output_dir. k and training seed are launch-time overrides, mirroring
+# tinystories_demo/launch_kpoint.sh:
+#
+#   --config_override "manifold_dim=16"  (k in {16, 64, 256})
+#   --config_override "seed=42"          (seed-1) / "seed=43" (seed-2)
+#   --config_override "output_dir=/mnt/faster3/lc2762/elf_bib_k16_s1"
+#
+# Batch 1 (endpoint gap): M1 x2 seeds + k16 x2 seeds.
+# Batch 2 (trend):        k64 x2 seeds + k256 x2 seeds.
+# Gate on paper/bib_registration.md G1 before launching batch 1.
+
+data_path: "bib_demo/data_50k/train"
+eval_data_path: "bib_demo/data_50k/val"
+max_length: 256
+pad_token: eos
+tokenizer_name: "t5-small"
+encoder_model_name: "t5-small"
+encoder_checkpoint: "embedded-language-flows/t5_small_encoder_jax/t5_small_encoder_jax.pkl"
+
+latent_mean: 0.0
+latent_std: 0.2
+
+model: "ELF-B"
+bottleneck_dim: 128
+num_time_tokens: 4
+num_self_cond_cfg_tokens: 4
+num_model_mode_tokens: 4
+
+# --- SM-ELF M2: low-rank manifold code + cycle + IB ---
+semantic_factorization: true
+num_phi_tokens: 4
+manifold_dim: 64          # overridden at launch; see header
+cycle_loss_weight: 1.0
+ib_beta: 0.001
+
+denoiser_p_mean: -1.5
+denoiser_p_std: 0.8
+denoiser_noise_scale: 2.0
+t_eps: 0.05
+time_schedule: "logit_normal"
+
+decoder_prob: 0.2
+decoder_noise_scale: 5.0
+decoder_p_mean: 0.8
+decoder_p_std: 0.8
+
+self_cond_prob: 0.5
+
+optimizer: "adamw"
+global_batch_size: 80
+blr: 0.001
+weight_decay: 0.0
+warmup_steps: 1000
+ema_decay1: 0.9999
+epochs: 60
+
+log_freq: 50
+save_freq: 2
+eval_freq: 0.5
+online_eval: false
+eval_use_ema: false
+
+sampling_configs_path: "src/configs/sampling_configs/uncond_sampling_configs.yml"
+num_samples: 10
+output_dir: "/mnt/faster3/lc2762/elf_bib_m2"
+use_wandb: false
+seed: 42

@@ -1,0 +1,81 @@
+{
+  "k": 16,
+  "seeds": 5,
+  "emb_project": "none",
+  "targets": [
+    "sentiment",
+    "gender",
+    "seniority",
+    "collaboration",
+    "focus",
+    "hobbies",
+    "quantities",
+    "teaching",
+    "length"
+  ],
+  "decon": "all",
+  "pairs": {
+    "sentiment->gender": {
+      "logit_shift": [
+        3.527347919344902,
+        0.71938695543441
+      ],
+      "auc": 1.0
+    },
+    "sentiment->seniority": {
+      "logit_shift": [
+        2.265664207935333,
+        0.658714480357649
+      ],
+      "auc": 1.0
+    },
+    "sentiment->collaboration": {
+      "logit_shift": [
+        3.0849031031131746,
+        0.8117482307698823
+      ],
+      "auc": 1.0
+    },
+    "sentiment->focus": {
+      "logit_shift": [
+        2.915283614397049,
+        1.56609795892834
+      ],
+      "auc": 1.0
+    },
+    "sentiment->hobbies": {
+      "logit_shift": [
+        2.6054991245269776,
+        0.8868796431754856
+      ],
+      "auc": 1.0
+    },
+    "sentiment->quantities": {
+      "logit_shift": [
+        3.939899408817291,
+        1.151343794882707
+      ],
+      "auc": 1.0
+    },
+    "sentiment->teaching": {
+      "logit_shift": [
+        2.8941069066524507,
+        1.1948801865306216
+      ],
+      "auc": 1.0
+    },
+    "sentiment->length": {
+      "logit_shift": [
+        3.07110915184021,
+        1.1811102190722118
+      ],
+      "auc": 1.0
+    }
+  },
+  "ctrl": {
+    "sentiment": [
+      0.0,
+      0.0
+    ]
+  }
+}

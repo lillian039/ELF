@@ -1,0 +1,41 @@
+{
+  "k": 16,
+  "seeds": 5,
+  "emb_project": "none",
+  "targets": [
+    "sentiment",
+    "gender",
+    "animal",
+    "length"
+  ],
+  "decon": "all",
+  "pairs": {
+    "sentiment->gender": {
+      "logit_shift": [
+        1.0411218374967575,
+        0.4435573265914158
+      ],
+      "auc": 0.6340277777777779
+    },
+    "sentiment->animal": {
+      "logit_shift": [
+        0.5404644101858139,
+        0.19722030289442125
+      ],
+      "auc": 0.7645833333333334
+    },
+    "sentiment->length": {
+      "logit_shift": [
+        0.5168506130576134,
+        0.20881310773306222
+      ],
+      "auc": 0.9541666666666668
+    }
+  },
+  "ctrl": {
+    "sentiment": [
+      0.4666666666666667,
+      0.23921166824012205
+    ]
+  }
+}

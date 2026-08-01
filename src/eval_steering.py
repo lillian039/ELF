@@ -235,6 +235,11 @@ def main():
         c = (c0 + a * u).astype(np.float32)
         phi_vec = (c @ U) if is_m2 else c   # M2 lifts via U; M1 phi == code (d-dim)
         phi_lift = jnp.asarray(np.repeat(phi_vec[None, :], M, axis=0))  # (M, d)
+        # routing-ablated models saw phi at only one component during
+        # training; condition each component at eval exactly as trained
+        route = getattr(cfg, "phi_route", "both")
+        phi_gen = phi_lift if route in ("both", "denoiser") else None
+        phi_dec = phi_lift if route in ("both", "decoder") else None
         rng, nrng, trng = jax.random.split(rng, 3)
         z = jax.random.normal(nrng, (M, L, d)) * cfg.denoiser_noise_scale
         t_steps = get_sampling_steps(trng, n_steps=steps, time_schedule=sc.time_schedule,
@@ -242,11 +247,11 @@ def main():
         latent = _generate_samples_single_batch(
             model_params=m0_params, model_apply_fn=m0.apply, rng=nrng,
             z=z, t_steps=t_steps, cond_seq=None, cond_seq_mask=None,
-            config=cfg, sampling_config=sc, cfg_scale=1.0, self_cond_cfg_scale=sccfg, phi=phi_lift,
+            config=cfg, sampling_config=sc, cfg_scale=1.0, self_cond_cfg_scale=sccfg, phi=phi_gen,
         )
         pred = np.asarray(mask_after_eos(_dlm_decode_batch(
             z=latent, model_params=m0_params, model_apply_fn=m0.apply,
-            t_final_val=float(t_steps[-1]), config=cfg, self_cond_cfg_scale=sccfg, phi=phi_lift,
+            t_final_val=float(t_steps[-1]), config=cfg, self_cond_cfg_scale=sccfg, phi=phi_dec,
         ), eos_id, pad_id))
         gtexts = [tok.decode(pred[m], skip_special_tokens=True) for m in range(M)]
         scores = [lexicon_sentiment(g) for g in gtexts]

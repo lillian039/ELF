@@ -1,0 +1,89 @@
+{
+  "k": 0,
+  "seeds": 5,
+  "emb_project": "none",
+  "targets": [
+    "sentiment",
+    "gender",
+    "seniority",
+    "academia",
+    "awards",
+    "experience_yrs",
+    "family",
+    "teaching",
+    "tech",
+    "length"
+  ],
+  "decon": "all",
+  "pairs": {
+    "sentiment->gender": {
+      "logit_shift": [
+        0.48246976751834153,
+        0.1487051039917411
+      ],
+      "auc": 0.809375
+    },
+    "sentiment->seniority": {
+      "logit_shift": [
+        0.1918969988822937,
+        0.11555448665014462
+      ],
+      "auc": 0.8013888888888889
+    },
+    "sentiment->academia": {
+      "logit_shift": [
+        0.3607397794723511,
+        0.07024551161876905
+      ],
+      "auc": 0.8784722222222221
+    },
+    "sentiment->awards": {
+      "logit_shift": [
+        0.5150659918785095,
+        0.17444887569474077
+      ],
+      "auc": 0.898263888888889
+    },
+    "sentiment->experience_yrs": {
+      "logit_shift": [
+        0.40243871659040453,
+        0.1388406374360116
+      ],
+      "auc": 0.7878472222222223
+    },
+    "sentiment->family": {
+      "logit_shift": [
+        0.17455883026123048,
+        0.060527330145655006
+      ],
+      "auc": 0.7447916666666667
+    },
+    "sentiment->teaching": {
+      "logit_shift": [
+        0.4319586157798767,
+        0.0767565363292261
+      ],
+      "auc": 0.8479166666666668
+    },
+    "sentiment->tech": {
+      "logit_shift": [
+        0.460175359249115,
+        0.12994916391166764
+      ],
+      "auc": 0.9038194444444445
+    },
+    "sentiment->length": {
+      "logit_shift": [
+        0.41021457267925143,
+        0.17870166464968576
+      ],
+      "auc": 0.8659722222222221
+    }
+  },
+  "ctrl": {
+    "sentiment": [
+      1.0,
+      0.0
+    ]
+  }
+}

@@ -153,9 +153,10 @@ def run_training(config):
 
     train_dataset, eval_dataset = load_dataset(config)
 
-    if getattr(config, "decorrelation_weight", 0.0) > 0:
+    if (getattr(config, "decorrelation_weight", 0.0) > 0
+            or getattr(config, "manifold_cf_weight", 0.0) > 0):
         from utils.data_utils import add_lexicon_labels
-        log_for_0("decorrelation_weight>0: precomputing lexicon sent/gender labels for the decorrelation regularizer.")
+        log_for_0("decorrelation/cf regularizer active: precomputing lexicon sent/gender labels.")
         train_dataset = add_lexicon_labels(train_dataset, tokenizer)
 
     # ============================================
@@ -413,6 +414,8 @@ def run_training(config):
                 avg_cyc_loss = float(jnp.mean(gathered["cyc_loss"])) if "cyc_loss" in gathered else 0.0
                 avg_ib_loss = float(jnp.mean(gathered["ib_loss"])) if "ib_loss" in gathered else 0.0
                 avg_dec_loss = float(jnp.mean(gathered["dec_loss"])) if "dec_loss" in gathered else 0.0
+                avg_cf_loss = float(jnp.mean(gathered["cf_loss"])) if "cf_loss" in gathered else 0.0
+                avg_cf_on = float(jnp.mean(gathered["cf_on"])) if "cf_on" in gathered else 0.0
                 now = time.time()
                 steps_per_sec = (global_step - last_log_step) / max(now - last_log_time, 1e-8)
                 current_lr = lr_schedule((global_step - 1) // grad_accum_steps)
@@ -430,6 +433,7 @@ def run_training(config):
                         f"INFO - engine - Step {global_step}: loss={avg_loss:.4f}, "
                         f"l2={avg_l2_loss:.4f}, ce={avg_ce_loss:.4f}, "
                         f"cyc={avg_cyc_loss:.4f}, ib={avg_ib_loss:.4f}, dec={avg_dec_loss:.4f}, "
+                        f"cf={avg_cf_loss:.4f}, cf_on={avg_cf_on:.4f}, "
                         f"lr={current_lr:.2e}, steps/sec={steps_per_sec:.2f}"
                     )
                     if config.use_wandb:

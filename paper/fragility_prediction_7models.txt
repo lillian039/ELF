@@ -1,0 +1,16 @@
+food           0.1329                     0.0815
+vehicle        0.0956                     0.0219
+weather        0.1652                     0.0025
+sentiment      0.0591                    -0.0675
+dialogue       0.1162                    -0.1552
+length        -0.0001                    -0.2170
+
+P1 registered weather > food > dialogue > vehicle
+P1 observed   food > vehicle > weather > dialogue   Spearman = 0.00
+P2 all new targets absorb more than sentiment & length: False
+
+P3 directed cells n=196
+   R2 model FE only         = 0.377
+   + ins_swing (1 dof)      = 0.406   slope = +1.10
+   + target FE (7 dof) ceiling = 0.563
+   fraction of target-FE gain captured by ins_swing: 0.15

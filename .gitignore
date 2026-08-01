@@ -17,3 +17,16 @@ wandb/
 # convenience symlinks to checkpoint dirs on faster3
 /checkpoints_v1
 /checkpoints_v2
+
+# symlinks to scratch checkpoint dirs
+/checkpoints_from_death
+/rho_runs
+
+# BiB dataset + eval logs (regenerable; live on faster3)
+bib_demo/data_50k/
+bib_demo/logs/
+bib_demo/__pycache__/
+tinystories_demo/data_50k_rho_m030/
+tinystories_demo/data_50k_rho_p000/
+tinystories_demo/data_50k_rho_p015/
+tinystories_demo/data_50k_rho_p030/

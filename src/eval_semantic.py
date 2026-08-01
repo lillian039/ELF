@@ -54,6 +54,8 @@ def parse_args():
     p.add_argument("--samples-per-phi", type=int, default=16)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", type=str, default=None, help="JSONL dump path for generations")
+    p.add_argument("--config_override", action="append", default=[],
+                   help="Override config values (field=value), e.g. manifold_dim=16.")
     return p.parse_args()
 
 
@@ -116,6 +118,8 @@ def _distinct2(token_id_rows, pad_id, eos_id):
 def main():
     args = parse_args()
     cfg = load_config_from_yaml(args.config)
+    if args.config_override:
+        cfg = apply_config_overrides(cfg, args.config_override)
     if not cfg.semantic_factorization:
         log_for_0("WARNING: config has semantic_factorization=false; this eval expects an SM-ELF model.")
     sc = cfg.sampling_configs[0]
@@ -178,8 +182,13 @@ def main():
     from utils.sampling_utils import get_sampling_steps
     all_rows = []  # (phi_idx, text, token_ids)
     gen_pooled = []  # pooled phi of each generation
+    route = getattr(cfg, "phi_route", "both")
     for k in range(K):
         phi_k = jnp.asarray(np.repeat(phi_bank[k][None, :], M, axis=0))  # (M, C)
+        # routing-ablated models saw phi at only one component during
+        # training; condition each component at eval exactly as trained
+        phi_gen = phi_k if route in ("both", "denoiser") else None
+        phi_dec = phi_k if route in ("both", "decoder") else None
         rng, nrng, trng = jax.random.split(rng, 3)
         z = jax.random.normal(nrng, (M, max_length, d_model)) * cfg.denoiser_noise_scale
         t_steps = get_sampling_steps(
@@ -190,11 +199,11 @@ def main():
             model_params=params, model_apply_fn=model.apply, rng=nrng,
             z=z, t_steps=t_steps, cond_seq=None, cond_seq_mask=None,
             config=cfg, sampling_config=sc, cfg_scale=1.0, self_cond_cfg_scale=sccfg,
-            phi=phi_k,
+            phi=phi_gen,
         )
         pred_ids = _dlm_decode_batch(
             z=latent, model_params=params, model_apply_fn=model.apply,
-            t_final_val=float(t_steps[-1]), config=cfg, self_cond_cfg_scale=sccfg, phi=phi_k,
+            t_final_val=float(t_steps[-1]), config=cfg, self_cond_cfg_scale=sccfg, phi=phi_dec,
         )
         pred_ids = np.asarray(mask_after_eos(pred_ids, eos_id, pad_id))
         # re-encode generations to measure their pooled semantic code

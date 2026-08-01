@@ -88,7 +88,10 @@ class ELF(nn.Module):
     manifold_dim: int = 0  # M2: if > 0, phi is produced by a low-rank ManifoldCode (k = manifold_dim)
     vocab_size: int = 0  # Vocabulary size for decoder unembedding
 
-    def build_context(self, t, self_cond_cfg_scale=None, phi=None):
+    def build_context(self, t, self_cond_cfg_scale=None, phi=None, phi_alt=None):
+        """Returns (prefix_tokens, phi_token_start). phi_alt, when given, appends a
+        SECOND phi token group sharing phi_proj/phi_tokens parameters (used by the
+        depth-window localization eval; no new parameters are created)."""
         prefix_tokens = []
         B = t.shape[0]
 
@@ -109,22 +112,39 @@ class ELF(nn.Module):
         # Semantic code phi(s): (B, text_encoder_dim) projected to hidden_size and
         # broadcast across num_phi_tokens learnable conditioning slots. Dropping phi
         # (passing zeros) yields the unconditional branch for CFG.
+        phi_token_start = sum(p.shape[1] for p in prefix_tokens)
         if phi is not None and self.num_phi_tokens > 0:
-            phi_emb = nn.Dense(
+            phi_proj = nn.Dense(
                 self.hidden_size, use_bias=True,
                 kernel_init=DEFAULT_KERNEL_INIT, bias_init=DEFAULT_BIAS_INIT, name='phi_proj',
-            )(phi)
-            prefix_tokens.append(_make_prefix(phi_emb, self.num_phi_tokens, 'phi_tokens'))
+            )
+            # Declare the slot bank ONCE (flax params are single-declaration);
+            # both phi groups share it, so the parameter structure is unchanged.
+            phi_slots = self.param('phi_tokens', NORMAL_INIT_002,
+                                   (1, self.num_phi_tokens, self.hidden_size))
+            tiled = jnp.tile(phi_slots, (B, 1, 1))
+            prefix_tokens.append(tiled + jnp.expand_dims(phi_proj(phi), 1))
+            if phi_alt is not None:
+                prefix_tokens.append(tiled + jnp.expand_dims(phi_proj(phi_alt), 1))
 
-        return prefix_tokens
+        return prefix_tokens, phi_token_start
 
     @nn.compact
     def __call__(
         self, x, t, attention_mask=None, deterministic=True,
         self_cond_cfg_scale=None, decoder_step_active=None, phi=None,
+        phi_lifted=False, phi_alt=None, phi_layer_select=None,
     ):
         """x: (N, S, C) or (N, S, 2C) with self-cond. t: (N,). attention_mask: (N, S), 1=valid.
-        phi: optional (N, text_encoder_dim) semantic code injected as a conditioning prefix."""
+        phi: optional (N, text_encoder_dim) semantic code injected as a conditioning prefix.
+        phi_lifted: static bool; True means phi is already the lifted conditioning
+        vector U c, so the ManifoldCode is bypassed (counterfactual training pass).
+        phi_alt / phi_layer_select: depth-window localization (inference only).
+        phi_alt is a second conditioning vector appended as a parallel phi token
+        group (shared parameters); phi_layer_select is a static length-`depth`
+        sequence of 0/1 where 1 means layer i attends to the PRIMARY phi group
+        and 0 means it attends to the ALT group (the other group is masked out
+        of that layer's keys). Both default to None: exact original behavior."""
         patch_size = 1
         head_dim = self.hidden_size // self.num_heads
         B = x.shape[0]
@@ -161,13 +181,16 @@ class ELF(nn.Module):
         # map it through the low-rank ManifoldCode to get the conditioning vector.
         # M1 (manifold_dim == 0) uses phi (the masked mean) directly.
         phi_for_prefix = phi
-        if phi is not None and self.manifold_dim > 0:
-            phi_for_prefix, _, _ = ManifoldCode(
-                self.manifold_dim, self.text_encoder_dim, name='manifold',
-            )(phi)
+        if phi is not None and self.manifold_dim > 0 and not phi_lifted:
+            manifold = ManifoldCode(self.manifold_dim, self.text_encoder_dim, name='manifold')
+            phi_for_prefix, _, _ = manifold(phi)
+            if phi_alt is not None:
+                phi_alt, _, _ = manifold(phi_alt)
 
         prefix_len = 0
-        context_prefix_tokens = self.build_context(t, self_cond_cfg_scale, phi=phi_for_prefix)
+        phi_token_start = 0
+        context_prefix_tokens, phi_token_start = self.build_context(
+            t, self_cond_cfg_scale, phi=phi_for_prefix, phi_alt=phi_alt)
         if context_prefix_tokens:
             prefix_tokens = jnp.concatenate(context_prefix_tokens, axis=1)
             prefix_len = prefix_tokens.shape[1]
@@ -181,6 +204,22 @@ class ELF(nn.Module):
             num_empty_token=prefix_len + model_mode_offset, name='feat_rope',
         )
 
+        # Depth-window localization: per-layer key masks hiding one phi group.
+        # Positions are static; the loop below is unrolled Python, so per-layer
+        # masks are ordinary traced arrays. attention_mask may be None in the
+        # standard path but is required here to carry the group masking.
+        layer_masks = None
+        if phi is not None and phi_alt is not None and phi_layer_select is not None:
+            if attention_mask is None:
+                attention_mask = jnp.ones((B, x.shape[1]), dtype=jnp.int32)
+            p0 = phi_token_start
+            p1 = p0 + self.num_phi_tokens          # primary group [p0, p1)
+            p2 = p1 + self.num_phi_tokens          # alt group     [p1, p2)
+            mask_primary = attention_mask.at[:, p1:p2].set(0)  # layer sees PRIMARY
+            mask_alt = attention_mask.at[:, p0:p1].set(0)      # layer sees ALT
+            layer_masks = [mask_primary if int(s) == 1 else mask_alt
+                           for s in phi_layer_select]
+
         q1, q3 = self.depth // 4, self.depth // 4 * 3
         for i in range(self.depth):
             in_drop_range = q3 > i >= q1
@@ -190,7 +229,8 @@ class ELF(nn.Module):
                 proj_drop=self.proj_drop if in_drop_range else 0.0,
                 name=f'blocks_{i}',
             )
-            x = block(x, rope_fn=feat_rope, attention_mask=attention_mask, deterministic=deterministic)
+            mask_i = layer_masks[i] if layer_masks is not None else attention_mask
+            x = block(x, rope_fn=feat_rope, attention_mask=mask_i, deterministic=deterministic)
 
         x = x[:, prefix_len + model_mode_offset:]
 

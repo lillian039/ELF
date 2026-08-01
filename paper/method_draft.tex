@@ -29,30 +29,34 @@ Attribute Superposition in Low-Rank Conditioning of Language Flows}
 
 \begin{abstract}
 Continuous, embedding-space language models such as ELF generate text by denoising
-an entire sequence of frozen encoder embeddings. We ask what happens when their
-conditioning is routed through an explicit, low-rank \emph{semantic code}: we factor
-the embedding as $\xb=\phib(s)+\rb$ and flow the residual $\rb$ conditioned on a
-learned code $\phib(s)=U\cb$, $\cb\in\R^{k}$. The intuition motivating such
-``semantic manifold'' codes is that a compact bottleneck yields cleaner, more
-disentangled control. We find the opposite. A low-rank code is no more controllable
-than full-rank mean-pool conditioning, and on a decontaminated disentanglement test
-it is \emph{more} entangled. A Manifold Probe applied to the code space shows
-superposition rising strictly monotonically as $k$ shrinks (five seeds, six code
-sizes) and tracking off-target leakage across code sizes ($r{=}0.90$); within a
-model, however, interference does not predict which pairs leak (mean Spearman
-$-0.53$): the probe reads aggregate capacity pressure, while which pairs leak is set
-by target fragility, token-local attributes (gender, animal) absorbing what globally
-distributed ones (tone, length) resist. Three interventions localize the mechanism.
-A decorrelation regularizer fails three ways as its weight grows: metric gaming (the
-trained cosine falls while probed interference triples and leakage rises),
-divergence, and loss of steerability. Retraining with the sentiment--gender
-correlation forced to $\phi\in[-0.3,+0.3]$ at fixed marginals changes neither
-superposition nor leakage. And projecting the conditioning vector off every
-off-target direction at inference changes nothing in seven models: the vector
-carries almost no linearly readable off-target content, so the leakage is
-manufactured inside the denoiser. Entanglement is driven by bottleneck capacity and
-realized in the generation pathway, not by data correlations or readout geometry. We
-caution against compact semantic bottlenecks as a disentanglement device.
+a sequence of frozen encoder embeddings. We ask what happens when their
+conditioning is routed through an explicit, low-rank \emph{semantic code}: factor
+the embedding as $\xb=\phib(s)+\rb$ and flow the residual conditioned on a
+learned code $\phib(s)=U\cb$, $\cb\in\R^{k}$. The motivating intuition is that a
+compact bottleneck yields cleaner, more disentangled control. We find the
+opposite. A low-rank code is no more controllable than full-rank mean-pool
+conditioning, and on a decontaminated test it is \emph{more} entangled: probed
+superposition rises strictly monotonically as $k$ shrinks and tracks off-target
+leakage across code sizes ($r{=}0.90$). Within a model the probe does not
+predict which pairs leak; the target does: a preregistered out-of-sample test
+shows leakage flows into attributes the denoiser already varies at fixed
+conditioning, weighted by single-token movability (cell-level $r{=}0.87$ on
+held-out attributes). Steering does not inject off-target content; it biases
+variation the denoiser already produces. Interventions localize the mechanism:
+a decorrelation regularizer games its own metric, diverges, or destroys
+steerability; forcing the data correlation changes nothing; projecting the
+conditioning vector off every off-target direction at inference changes
+nothing in seven models. The vector is a pointer, and the leak is
+manufactured in the denoiser; a counterfactual penalty on that pathway helps
+only where aimed, and the pressure resurfaces on untrained routes. A
+preregistered replication on professional biographies compounds the result:
+there the bottleneck also degrades on-target control while leaking more per
+unit of it, and one model severs its denoiser's code read entirely yet leaks
+worst in the fleet through the $\phi$-conditioned decoder head, invisible to
+every code-space diagnostic. A depth-window instrument places the code's
+entry in the first layers of every model: control and leakage separate along
+trajectory time, not depth. We caution against compact semantic bottlenecks
+as a disentanglement device.
 \end{abstract}
 
 % ===========================================================================
@@ -76,8 +80,10 @@ disentanglement literature, is that squeezing conditioning through a compact
 ``semantic manifold'' should concentrate reusable global structure and yield cleaner,
 more separable control.
 
-We test this intuition on TinyStories and it does not hold. The low-rank code is no
-more controllable than full-rank mean-pool conditioning, and once we decontaminate
+We test this intuition on TinyStories, then preregister a replication on Bias
+in Bios biographies, and it holds on neither. The low-rank code is no
+more controllable than full-rank mean-pool conditioning (on the harder corpus it
+is measurably \emph{less}), and once we decontaminate
 the steering axis of correlated attributes it disentangles \emph{worse}. Rather than
 stop at a negative result, we ask \emph{why}, and find a concrete mechanism:
 squeezing many attributes through a low-rank code forces them into
@@ -94,8 +100,11 @@ or disentanglement over full-rank conditioning, and is measurably more entangled
 a decontaminated test (\S\ref{sec:leak}).
 (iii) The mechanism, measured directly: probed superposition grows strictly
 monotonically as $k$ shrinks and tracks leakage across code sizes ($r{=}0.90$), but
-within a model it does not rank which pairs leak; target fragility does
-(\S\ref{sec:superpos}).
+within a model it does not rank which pairs leak; the target does, and a
+preregistered out-of-sample test isolates the target property: leakage flows into
+attributes the denoiser varies naturally at fixed code, weighted by single-token
+movability (cell-level $r{=}0.87$ on four held-out attributes;
+\S\ref{sec:superpos}--\ref{sec:law}).
 (iv) Evidence the entanglement is \emph{intrinsic} and lives in the generation
 pathway: a decorrelation regularizer fails by metric gaming, divergence, or
 steerability collapse, and inference-time projection of the conditioning vector off
@@ -103,6 +112,23 @@ all off-target directions changes nothing in seven models (\S\ref{sec:mitig}).
 (v) A causal null on the data side: forcing the sentiment--gender correlation across
 $[-0.3,+0.3]$ at fixed marginals leaves superposition and leakage unchanged at
 $k{=}64$ and $k{=}16$ (\S\ref{sec:rho}).
+(vi) A preregistered second-corpus replication (Bias in Bios biographies) in
+which the capacity harm transfers and compounds: the low-rank code loses
+on-target control while leaking more per unit of it, and a two-round
+preregistered test shows the targeting law replicates on source-independent
+targets for every functional-code model ($\rho\,0.31\!\to\!0.60$ once the
+test set's source confound is removed by a frozen screening rule;
+\S\ref{sec:bib}).
+(vii) A depth-window instrument (parallel $\phi$ token groups, per-layer key
+masks) that closes the localization grid: in every model the code is read in
+the first quartile of layers, control and leakage share that entry point,
+and the pressure differentiates along trajectory time; the same instrument
+anatomizes the one law-violating model, whose denoiser is bitwise
+$\phi$-invariant while its leak rides the $\phi$-conditioned decoder head
+(\S\ref{sec:depth}).
+(viii) A minimal model (bottleneck, generator, manifold snap) that reproduces all
+four regularities, giving the chain capacity $\to$ overlap $\to$ biased natural
+variation $\to$ leakage a mechanistic reading (\S\ref{sec:toy}).
 
 % ===========================================================================
 \section{Related work}
@@ -258,8 +284,32 @@ The robust picture is nuanced but consistent. The mean gender logit-shift
 $k{=}8\!\to\!16\!\to\!64\!\to\!256$ ($1.31\!>\!0.97\!>\!0.76\!>\!0.45$), and the
 endpoint is cleanly separated from the mean-pool floor ($k{=}16$: $0.97\!\pm\!0.15$
 vs.\ M1: $0.37\!\pm\!0.06$); adjacent $k$ overlap at five evaluation seeds, so we
-claim the trend and the endpoint gap rather than strict step-by-step separation, and
-flag model-level seeds as the main remaining rigor gap. Two departures from a pure
+claim the trend and the endpoint gap rather than strict step-by-step separation.
+Additional model seeds support this reading and sharpen it
+(Table~\ref{tab:seeds}). The probe's aggregate readings replicate almost
+digit-for-digit and the behavioral endpoint story holds, but adjacent-$k$
+point ordering is not stable across model seeds, and the capacity collapse we
+placed at $k{=}8$ has a seed-dependent boundary: two of three $k{=}16$ seeds
+lose most of their on-target control while their probed capacity barely
+moves. Aggregate capacity pressure is a highly reproducible function of $k$;
+the per-seed behavioral consequences at a fixed small $k$ are not.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l ccc cc}
+& \multicolumn{3}{c}{$k{=}16$} & \multicolumn{2}{c}{$k{=}64$} \\
+& s1 & s2 & s3 & s1 & s2 \\
+\hline
+probe capacity ratio       & 0.388 & 0.387 & 0.363 & 0.100 & 0.100 \\
+gender logit-shift         & $0.97\!\pm\!.15$ & $1.04\!\pm\!.44$ & n/a & $0.76\!\pm\!.30$ & $1.04\!\pm\!.31$ \\
+on-target control $\Delta$ & 1.00 & 0.47 & 0.32 & 1.00 & 1.00 \\
+\end{tabular}
+\caption{Model-seed replication. The probe's aggregate capacity reading is
+nearly seed-invariant while the behavioral consequences at small $k$ are not:
+two of three $k{=}16$ seeds lose most of their on-target control.}
+\label{tab:seeds}
+\end{table}
+
+Two departures from a pure
 dimensionality story are informative. \emph{Capacity collapse at $k{=}8$:} on-target
 control, $1.0$ at every larger $k$, drops to $0.63\!\pm\!0.06$: the extreme bottleneck
 can no longer represent the steered attribute, so leakage and control fail together.
@@ -340,11 +390,69 @@ $R^2{=}0.24$ of directed leakage, adding target effects raises this to $0.52$,
 source effects add $0.01$, and interference adds $0.001$. Leakage flows into gender
 ($+0.19$ in calibrated logit units) and animal ($+0.21$) and away from sentiment
 ($-0.26$) and length ($-0.14$), consistently across models and sources, and the
-split is not explained by base rate or source steerability. The leak-prone targets
-are the \emph{token-local} attributes (a pronoun, an animal mention); the
-\emph{globally distributed} ones (tone, length) resist incidental flipping. The
-probe, then, reads \emph{how much} capacity pressure a code is under; \emph{which}
-pairs pay for it is set by target fragility, not pair geometry.
+split is not explained by base rate or source steerability. The probe, then, reads
+\emph{how much} capacity pressure a code is under; \emph{which} pairs pay for it is
+a property of the target, which \S\ref{sec:law} isolates and makes predictive.
+
+\subsection{The leak follows the denoiser's own variation, predictively}
+\label{sec:law}
+Target identity is not yet a mechanism. To find the property behind it we scored
+candidate predictors by \emph{preregistered out-of-sample prediction}: new
+lexicon attributes are added to the protocol as scoring targets only (the same
+generations are scored against more held-out classifiers, so the behavioral data
+cannot leak into the choice of predictor), predictions for the new targets are
+written down, then their leakage is measured. Target structure itself replicates
+on held-out attributes: over twelve targets and seven models (308 directed
+cells), target effects still add $R^2$ $0.68\!\to\!0.74$ over model effects.
+
+Candidate predictors and their fates are summarized in
+Table~\ref{tab:predictors}. Every data-side candidate fails; evidence
+\emph{redundancy} even anti-predicts (gender, the most redundant attribute,
+ranks least fragile, opposite to its observed absorbency). What succeeds is a
+\emph{model-side} quantity. Since the interventions of \S\ref{sec:mitig}
+place the leak inside the denoiser, we measured each attribute's
+\emph{natural variation}: at a fixed conditioning code, resampling only the
+generation noise, the standard deviation of the attribute's held-out
+classifier logit across samples. Natural variation correlates positively with
+absorbency inside every model (Spearman $+0.29$ to $+0.69$), and a second
+preregistration held its three-parameter combination with insertion
+movability to account: fit on the eight measured attributes, predictions
+registered for four fresh ones (color, plant, water, question) over all 28
+(model, target) cells, then measured. The predictions hit (ordering Spearman
+$0.80$, a single adjacent swap; cell-level Pearson $0.87$), and the relation
+survives every training condition in the study: pooling the $\phi$-retrained
+models of \S\ref{sec:rho} (both seeds), the extra $k$-sweep seeds, and the
+$\lambda{=}1$ decorrelation model, twenty models and over $850$ directed
+cells in all, the natvar--leakage correlation is positive in every single
+model.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l l l}
+predictor & target-effect gain captured & preregistered out-of-sample \\
+\hline
+deletion fragility (data-side)   & anti-predicts & Spearman $0.0$ (4 held-out) \\
+class balance (data-side)        & ${<}0.01$ $R^2$ & n/a \\
+source--target axis alignment (data-side) & ${<}0.01$ $R^2$ & n/a \\
+insertion movability (data-side) & 15\% & n/a \\
+natural variation (model-side)   & 27\% & n/a \\
+natvar $\times$ movability (3-param) & 45\% fit; 41--60\% held out & Spearman $0.80$, cell $r{=}0.87$ \\
+\end{tabular}
+\caption{Candidate predictors of which targets absorb leakage. Data-side
+scores fail or anti-predict; the model-side natural-variation predictor,
+alone and combined with movability, survives two rounds of preregistered
+out-of-sample prediction (41\% on the four fresh targets; 60\% pooled over
+twenty models and $850$ directed cells).}
+\label{tab:predictors}
+\end{table}
+
+The picture is
+mechanistic and simple: steering does not force new content into the
+generation, it \emph{biases variation the denoiser already produces}. Dialogue
+is the clean dissociation: highly movable by insertion, but the denoiser never
+varies it at fixed code (flip probability $0.000$ at $k{=}64$), and it resists
+leakage; plant and water, which the denoiser varies freely, absorb at the level
+of gender. The bottleneck sets how much pressure exists
+(\S\ref{sec:superpos}); the denoiser's variation modes set where it lands.
 
 \begin{table}[h]\centering\small
 \begin{tabular}{l cccccc c}
@@ -415,12 +523,95 @@ delta is already nearly orthogonal to the off-target directions (the projection
 removes $3.7\%$ of its norm at $k{=}64$). There is no linearly readable off-target
 content in the conditioning signal to remove; the drift is manufactured
 \emph{downstream}, by the denoiser's learned response to the on-target component.
+A sparse-dictionary decomposition shows this null is not an artifact of the
+linear basis, and sharpens it: with a 4096-feature sparse autoencoder trained
+on pooled story embeddings (instrument validated on the embedding-space
+sentiment direction, which activates sentiment-associated features at
+$4.5\times$ the random-feature baseline), the injected delta's feature
+attribution is at chance for \emph{every} attribute, including sentiment
+itself. The conditioning vector is a pointer the denoiser interprets, not a
+payload carrying content; there is nothing in it to excise, for the off-target
+attributes or even for the steered one.
 
 The interventions thus bracket the leak: it survives decontamination of the code
 axis, decorrelation during training, decorrelation of the data (\S\ref{sec:rho}),
 and decontamination of the injected vector. What remains is the denoiser's
-conditional response, so a remedy would have to retrain the generation pathway
-itself (e.g.\ an adversary on the decoder output), which we leave to future work.
+conditional response, which the next paragraph attacks directly.
+
+\paragraph{A counterfactual penalty on the generation pathway itself.}
+The localization prescribes where a remedy must act. We therefore add, at every
+denoiser step, a second forward pass with the code steered along the per-batch
+sentiment axis (gender projected out), $\cb'=\cb+\alpha\hat{\bm u}_\perp$ with
+$\alpha\sim\pm U[1,3]$, and penalize the movement of the counterfactual
+reconstruction's pooled embedding along the frozen gender direction,
+$\lambda_{\mathrm{cf}}\,\big((\mathrm{pool}(\hat\xb')-\mathrm{pool}(\hat\xb))^{\!\top}
+\hat{\bm w}_g/\sigma_g\big)^2$, the factual side stop-gradiented: the denoiser may
+move sentiment but must not move gender while doing so. Getting this to train at
+all required two structural precautions, each exposing a further defense of the
+entanglement. With gradients allowed into the code stack, the model inflates the
+code norm until fixed-magnitude steers are relatively negligible (the IB term
+grows by three orders of magnitude before the velocity loss diverges): the same
+metric-gaming family as \S\ref{sec:mitig}, now against an output-space penalty.
+With the steer scaled by the live code RMS instead, the cycle loss chases the
+counterfactually reshaped denoiser and the two spiral into a feedback runaway.
+The stable form restricts the gradient to the denoiser (every manifold-side
+quantity stop-gradiented), uses constant-scale steers (the IB anchors the code
+RMS), and applies no counterfactual pressure for the first 12 epochs.
+Table~\ref{tab:cf} summarizes the weight sweep; each row is a diagnostic the
+mechanism account makes meaningful. At $\lambda_{\mathrm{cf}}{=}1$ the penalty
+is satisfied exactly at the level it is imposed, and defeated one level up:
+the terminal-step drift it targets is almost eliminated and probed
+interference is untouched, but text-level on-target control collapses, every
+source's steerability is muted (mean directed leakage falls only in
+proportion), the protected pair does not improve, and the generation
+distribution drifts (positive-sentiment rate $0.99$). The mechanism account
+of \S\ref{sec:law} makes a sharper demand than ``leakage goes down'': an
+effective generation-pathway fix should reduce the denoiser's \emph{natural
+variation} of the protected attribute together with its leakage. The opposite
+happens, natvar(gender) doubles, diagnosing the run as a distributional
+retreat, not a disentanglement. At the other end,
+$\lambda_{\mathrm{cf}}{=}0.1$ vanishes without trading anything: control, the
+protected pair, natvar, and interference all sit at baseline; a run that did
+not change the denoiser's generative habit, and correspondingly did not
+change its leakage.
+
+The middle of the curve is where the penalty finally works as designed, and
+its success is as diagnostic as the failures. At $\lambda_{\mathrm{cf}}{=}0.3$
+the protected pair improves $35\%$ at small control cost, the terminal-step
+leak realization is eliminated, and, exactly as the mechanism account
+demands, the denoiser's \emph{natural} gender flipping at fixed code is wiped
+out: suppressing the variation mode suppresses the leakage that rides it,
+closing the law-to-intervention causal loop. But the protection is
+\emph{route-specific}: leakage into gender from a source the counterfactual
+never trained on doubles, and the twelve-pair mean does not improve
+(Table~\ref{tab:cf}). A single-direction penalty redistributes the
+bottleneck's pressure rather than removing it. The first intervention in this
+study that moves leakage in the right direction therefore also confirms the
+thesis: the entanglement behaves as a conserved pressure that yields only
+where it is individually pinned, and a complete fix would need counterfactual
+coverage of the full source--target set, which we leave to future work.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l cccc}
+$\lambda_{\mathrm{cf}}$ & 0 (baseline) & 0.1 & 0.3 & 1 \\
+\hline
+on-target control $\Delta$          & 0.88 & 0.97 & 0.84 & \textbf{0.11} \\
+protected pair s$\to$g              & $1.01\!\pm\!.22$ & $0.98\!\pm\!.27$ & $\mathbf{0.66\!\pm\!.16}$ & $1.11\!\pm\!.12$ \\
+mean, 12 directed pairs             & 0.61 & n/a & 0.72 & 0.47 \\
+animal$\to$gender (untrained route) & 0.68 & n/a & \textbf{1.44} & n/a \\
+terminal-step leak realization      & 0.40 & n/a & 0.01 & 0.01 \\
+natvar(gender) at fixed code        & 0.144 & 0.156 & n/a & \textbf{0.265} \\
+paired-resample gender flip rate    & 0.095 & n/a & \textbf{0.000} & n/a \\
+probed s--g interference            & 0.069 & 0.046 & n/a & 0.072 \\
+\end{tabular}
+\caption{The counterfactual-penalty weight sweep at $k{=}64$.
+$\lambda_{\mathrm{cf}}{=}0.1$ changes no diagnostic; $\lambda_{\mathrm{cf}}{=}1$
+suppresses the terminal step but collapses control and doubles natural
+variation (a distributional retreat); $\lambda_{\mathrm{cf}}{=}0.3$ is the
+working point: the protected pair improves and its natural variation mode is
+switched off, while an untrained route into the same attribute doubles.}
+\label{tab:cf}
+\end{table}
 
 \begin{table}[h]\centering\small
 \begin{tabular}{l ccccccc}
@@ -504,14 +695,425 @@ packs attributes into limited dimensions, present even when the attributes are
 statistically independent in the data. What moves it, in both directions and
 monotonically, is $k$.
 
+\subsection{On a harder corpus the harm replicates, and compounds}
+\label{sec:bib}
+Everything so far is one corpus. We therefore preregistered a replication on
+professional biographies (Bias in Bios, first-sentence-removed
+\texttt{hard\_text}): 50k bios under the identical architecture,
+hyperparameters, and budget, steering an occupation macro-domain axis
+(health-care vs.\ creative professions, 28\% and 22\% of the subset) with
+gender again the off-target readout. Gates, endpoints, analysis rules, and the
+one instrument amendment (a logistic-regression readout in the frozen space,
+adopted when difference-of-means saturated at AUC $0.886$ on bios; the
+logistic readout reaches $0.999$) were written down before the corresponding
+measurements ran. The sanity gate passed at half training: fidelity $0.916$,
+distinct-2 $0.895$, monotonic $0\!\to\!1$ on-target control for the full-rank
+reference.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l cccc}
+& M1 & $k{=}256$ & $k{=}64$ & $k{=}16$ \\
+\hline
+on-target control (s1/s2)      & 1.00\,/\,1.00 & 1.00\,/\,0.97 & 0.86\,/\,0.68 & 0.69\,/\,0.35 \\
+gender logit-shift (s1/s2)     & 1.07\,/\,1.15 & 0.86\,/\,1.03 & 1.03\,/\,1.17 & 1.17\,/\,0.96 \\
+leakage per unit control       & 1.07\,/\,1.15 & 0.86\,/\,1.06 & 1.20\,/\,1.72 & 1.68\,/\,2.75 \\
+probe mean interference        & .013\,/\,.013 & .065\,/\,.070 & .177\,/\,.139 & .232\,/\,.056$^\dagger$ \\
+\end{tabular}
+\caption{Bias in Bios replication: two training seeds per condition, five
+evaluation seeds each, logistic-regression instrument throughout. Control and
+normalized leakage are monotone in $k$ at seed mean. $^\dagger$The second
+$k{=}16$ seed's denoiser has severed its code read entirely (control $0.35$
+at the text level, bitwise $\phi$-invariant latents); its clean probe
+reading next to fleet-worst leakage is anatomized in \S\ref{sec:depth}.}
+\label{tab:bib}
+\end{table}
+
+The capacity effect replicates, but not in the TinyStories form, because a
+precondition of that form breaks: on this corpus the low-rank code degrades
+on-target control itself (Table~\ref{tab:bib}, top row), from saturation at
+full rank to $0.69/0.35$ across seeds at $k{=}16$, with no regularizer
+involved. Raw logit-shifts are therefore confounded across models, exactly the
+case the preregistered control-parity guard anticipated, and its fallback
+metric applies: leakage per unit on-target shift. On that metric the low-rank
+code is worse in both seeds at $k{=}16$, and both quantities are monotone in
+$k$ at seed mean (normalized leakage $2.22 > 1.46 > 0.96 \approx 1.11$;
+control $0.52 < 0.77 < 0.98 \approx 1.00$). Two corpus differences are
+findings, not noise. First, the full-rank floor is roughly $3\times$ its
+TinyStories value ($1.07$--$1.15$ vs.\ $0.37$): biographies are a
+higher-baseline-entanglement corpus, and capacity pressure separates models
+only at small $k$. Second, the control loss mirrors the steerability collapse
+that decorrelation pressure induced on TinyStories (\S\ref{sec:mitig}), except
+that here nothing induces it but the bottleneck. On the harder corpus a
+compact code is worse on both sides of the ledger: less control, and more
+leakage per unit of the control that remains. A third $k{=}16$ seed,
+trained afterward to arbitrate how typical the severed-code outcome is,
+answers both questions at once: its code is functional (probe $.227$
+next to seed 1's $.232$, healthy natural variation, quality gate passed
+at $+.06$), so the denoiser abandoning its code is a one-in-three
+outcome rather than the mode, and its harm is the strongest of the
+three: control $0.27$ with gender shift $1.83$, normalized leakage
+$6.9$ against $1.7$ and $2.8$ for the first two seeds.
+
+The probe sharpens the localization claim rather than merely repeating it.
+Among models whose code is functional, probed interference is again strictly
+monotone in $k$ (seed 1: $.232 > .177 > .065 > .013$) and tracks normalized
+leakage at $r{=}0.70$ ($0.90$ on TinyStories). The instructive point is the
+excluded one. The second $k{=}16$ seed pairs the fleet-worst normalized
+leakage ($2.75$) with near-clean code geometry ($.056$, below $k{=}256$): a
+model can abandon its code and keep leaking, and the code-space probe cannot
+see it. This is the cross-model form of the within-model dissociation of
+\S\ref{sec:superpos}. Where the leak of an abandoned code actually travels
+turned out to be answerable exactly, and the answer (\S\ref{sec:depth}) is
+that it changes carriers.
+
+The targeting law of \S\ref{sec:law} took two preregistered rounds here and
+ended sharper than it began. Round 1 (ranking registered before measurement)
+scored Spearman $0.31$ against a registered $0.5$, and the miss was
+structured: the top absorbers (teaching $1.04$, tech $0.91$, academia $0.78$)
+are occupation-adjacent, so the source--target semantic independence that
+TinyStories' attribute set provided does not hold when the steered source is
+an occupation axis. Round 2 made that diagnosis testable. We froze a
+selection rule (prevalence $\geq 5\%$; $|\log\mathrm{OR}| \leq 0.5$ of
+presence between health- and creative-profession bios), checked that it cuts
+in both directions (it rejects exactly the round-1 confounded targets, and
+also rejects intuitively neutral candidates the data disqualifies: geography
+at $-0.61$, temporal at $-0.98$, featured at $-2.26$), and registered
+per-(model, target) predictions, per-model natural variation times
+movability, for the seven surviving targets across all eight models, 56
+cells. The registered pooled test failed (Spearman $0.074$, Pearson
+$-0.45$), for one pre-flagged reason: every cell of the second $k{=}16$ seed
+was predicted near zero (its natural variation at fixed code reads
+${\approx}0$) and every one measured fleet-maximum leakage ($2.3$--$3.9$).
+The preregistered companion excluding that one model passed cleanly
+($\rho{=}0.599$, $p{<}10^{-4}$, 49 cells). On source-independent targets the
+law replicates for every model whose code is functional; the round-1 miss
+was a property of the test set, and the one genuine violation has a precise
+mechanism, which \S\ref{sec:depth} isolates: that model's leakage does not
+travel through the denoiser at all.
+
+\paragraph{Dose-response.} A post-hoc extension (not preregistered) sweeps
+the steering dose over nine points, $\alpha \in [-4, 4]$, on all eight
+models, with the occupation axis orthogonalized against gender before
+steering and 24 generations per dose (Table~\ref{tab:dose}). Full rank
+turns the target attribute fully and monotonically in both seeds while
+gender moves $0.21$/$0.13$ of its range. Every bottleneck model drags
+gender across most or all of its range under the same decontaminated
+axis, and the swing is dose-locked, not a baseline offset: at $k{=}256$
+(both seeds) the gender fraction steps from $0$ to near $1$ in the same
+unit dose interval that turns the target. Per unit of achieved on-target
+change at seed 1, off-target motion orders exactly as the normalized
+leakage of Table~\ref{tab:bib}: $0.21$ (M1) vs.\ $1.00$--$1.21$ (all
+bottlenecks). The dose domain also re-finds the control degradation of
+the main table, and seed 2 is categorical: no bottleneck seed-2 model
+retains monotonic dose control at all (endpoint $\Delta \leq 0.29$),
+while gender ranges stay at $0.54$--$0.96$. The failures have distinct
+shapes: $k{=}16$ s1 overshoots ($1.00$ at $\alpha{=}1$, back to $0.62$ by
+$\alpha{=}4$) with a U-shaped gender readout ($0.71 \to 0.04 \to 0.75$,
+both directions under one axis); $k{=}256$ s2 steers cleanly up to
+$\alpha{=}3$ and then collapses generatively at $\alpha{=}4$ (mean output
+length drops to $5$ tokens), so its endpoint $\Delta$ reads $0.04$
+through breakdown rather than unresponsiveness.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l cccc}
+& M1 & $k{=}256$ & $k{=}64$ & $k{=}16$ \\
+\hline
+on-target endpoint $\Delta$ (s1/s2) & $+1.00$\,/\,$+1.00$ & $+1.00$\,/\,$+0.04^{\dagger}$ & $+0.88$\,/\,$+0.29$ & $+0.62$\,/\,$+0.25$ \\
+monotonic on-target (s1/s2)         & yes\,/\,yes & yes\,/\,no & no\,/\,no & no\,/\,no \\
+off-target gender range (s1/s2)     & $0.21$\,/\,$0.13$ & $1.00$\,/\,$0.96$ & $0.92$\,/\,$0.83$ & $0.75$\,/\,$0.54$ \\
+gender range per unit $\Delta$ (s1) & $0.21$ & $1.00$ & $1.05$ & $1.21$ \\
+\end{tabular}
+\caption{Dose-response on Bias in Bios (both seeds, $\alpha \in [-4,4]$,
+nine doses, gender-orthogonalized axis, lexicon readout). Full rank buys
+full monotonic control in both seeds at a fraction of the off-target
+motion of any bottleneck; per-unit ratios are omitted at seed 2 where
+bottleneck on-target control fails outright. $^{\dagger}$Generative
+collapse at $\alpha{=}4$ (mean length $5$ tokens), not unresponsiveness.}
+\label{tab:dose}
+\end{table}
+
+\paragraph{Quality gate, per seed.} Every leakage number above comes from
+a generator that independently passes a semantic quality gate (fidelity to
+$\phi$, same-$\phi$ versus cross-$\phi$ embedding separation with margin
+$>0.02$, bigram diversity), with two instructive exceptions
+(Table~\ref{tab:quality}). The severed $k{=}16$ s2 model passes the gate
+($+.058$ margin) despite its $\phi$-inert denoiser, which is exactly the
+carrier finding of \S\ref{sec:depth}: its decoder head alone suffices to
+imprint $\phi$ on text. The $k{=}256$ s2 model fails with a negative
+margin (same-$\phi$ generations no more similar than cross-$\phi$), so its
+per-seed cells in Table~\ref{tab:bib} come with weaker $\phi$ fidelity,
+while its seed-1 twin passes with the fleet-best margin; no conclusion in
+this section changes if the model is dropped. The two extra TinyStories
+$k{=}16$ seeds sit marginally below the gate ($+.008$/$+.009$), consistent
+with $k{=}16$ being the capacity at which code reading itself becomes
+fragile (\S\ref{sec:law}).
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l cccc l}
+model & fidelity & within & across & margin & gate \\
+\hline
+BiB M1 s1/s2          & .93/.92 & .97/.96 & .91/.91 & $+$.057/$+$.053 & pass/pass \\
+BiB $k{=}16$ s1/s2    & .88/.88 & .96/.96 & .90/.90 & $+$.059/$+$.058 & pass/pass \\
+BiB $k{=}64$ s1/s2    & .90/.91 & .95/.96 & .92/.90 & $+$.032/$+$.060 & pass/pass \\
+BiB $k{=}256$ s1/s2   & .92/.87 & .97/.87 & .90/.89 & $+$.072/$-$.015 & pass/\textbf{fail} \\
+TS $k{=}16$ s2/s3     & .94/.94 & .95/.95 & .95/.94 & $+$.008/$+$.009 & \textbf{fail}/\textbf{fail} \\
+TS $k{=}64$ s2        & .96     & .97     & .92     & $+$.041         & pass \\
+\end{tabular}
+\caption{Per-seed semantic quality gate for every model added by the
+replication and seed-robustness studies (gate: margin $>.02$ and
+distinct-2 $>.3$; all models clear distinct-2 at $.76$--$.90$). The
+severed BiB $k{=}16$ s2 passes through its decoder channel.}
+\label{tab:quality}
+\end{table}
+
+\subsection{A minimal model reproduces every regularity}
+\label{sec:toy}
+The full causal chain, capacity $\to$ overlap $\to$ biased natural variation
+$\to$ leakage, is simple enough to demand a toy model, and a small one
+suffices (\texttt{toy\_capacity\_leakage.py}; independent binary attributes on
+orthogonal directions, a learned linear-encoder bottleneck $k$, an MLP
+generator, and a manifold snap whose per-attribute basin sharpness plays the
+role of natural variation, the analogue of decoding to tokens). With no
+tuning beyond matching the protocol (difference-of-means axes, three-axis
+decontamination, fixed-code resampling), the toy reproduces all four
+regularities of the study: probe interference rises strictly monotonically as
+$k$ shrinks; across controllable models interference tracks mean leakage at
+$r{=}0.97$ (the study: $0.90$); below a critical $k$ steering and leakage die
+together, the capacity-collapse analogue of $k{=}8$; and within a model,
+which attributes absorb the leak is predicted by their natural variation
+(mean Spearman $+0.44$, positive in five of six code sizes) and not by
+pairwise code-direction overlap (mean $+0.10$, sign-inconsistent). The
+mechanism the toy isolates is geometric: steering along a decontaminated but
+superposed axis pushes the generator off the data manifold, and the snap back
+lands disproportionately on the attributes with the shallowest basins. Leakage
+is the bottleneck's pressure released through the generator's softest modes.
+
+The real model contains a direct analogue of the snap, and a time-windowed
+steering intervention confirms it carries the effect. Applying the steered
+code only during chosen segments of the sampling trajectory (unsteered
+conditioning elsewhere, noise paired across runs), the first three quarters of
+the integration steps each contribute little (on-target $0.02$--$0.44$ against
+a full-trajectory $3.9$ at $k{=}64$), while steering \emph{only the terminal
+integration step}, the long consolidation leap onto the final embedding,
+reproduces $80\%$ of on-target control and $96\%$ of the leakage; $k{=}256$
+and the $\phi$-controlled retrainings behave identically. Control is
+terminal-dominant in \emph{every} model (M1's terminal step carries
+$3.4$ of its $3.5$ total, with leakage ${\le}0.02$ in every window). Leakage,
+however, migrates earlier as the bottleneck tightens: distributed across the
+whole trajectory at $k{=}16$, and predominantly \emph{early} at $k{=}8$, where
+the first half of the steps writes leakage $0.33$--$0.64$ while contributing
+no on-target control at all. Under mild pressure the drift is realized where
+the trajectory commits to the manifold, exactly where the toy places it; under
+extreme pressure the contaminated conditioning bends the entire path, and the
+snap merely finishes what the trajectory has already conceded. The paired-trajectory readout is also a third, text-free measurement of
+the main result: at matched on-target movement, every learned bottleneck code
+leaks $13$--$17\times$ more per unit of control than the mean-pool reference
+(final-state off-target/on-target ratio $0.11$--$0.14$ for $k{=}16$--$512$
+against $0.008$ for M1), and at $k{=}8$ the ratio exceeds one: the extreme
+bottleneck moves the off-target reading \emph{more than the steered one}, the
+trajectory-level face of its capacity collapse.
+
+\subsection{Where the code is read: closing the localization grid}
+\label{sec:depth}
+The time-windowed analysis says WHEN steering takes effect; a second
+instrument asks WHERE in the network the code is read. We prepend the
+steered and unsteered codes as two parallel $\phi$ token groups (sharing all
+parameters, so checkpoints load unchanged) and give every layer a key mask
+selecting which group it may attend to: a contiguous layer window reads the
+steered code, all other layers read the base code, constant across the
+trajectory. All measured conditions run through one graph with paired noise
+(the masking's exactness is verified to $4{\times}10^{-6}$ at the forward
+level; TF32 matmuls must be disabled, and the base-$\phi$ readout frame
+isolates the denoiser's residual response from the additive $\phi$ shift).
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l rr rr r}
+& full ctrl & full leak & q1 ctrl share & q1 leak share & other-q max \\
+\hline
+TS M1        & 0.151 & 0.025 & 0.82 & 1.07 & 0.25 \\
+TS $k{=}8$   & 2.404 & 2.687 & 0.93 & 0.91 & 0.06 \\
+TS $k{=}16$  & 2.116 & 0.274 & 1.01 & 1.02 & 0.10 \\
+TS $k{=}64$  & 2.925 & 0.376 & 1.00 & 1.01 & 0.04 \\
+TS $k{=}256$ & 2.877 & 0.167 & 1.00 & 0.92 & 0.10 \\
+TS $k{=}512$ & 2.917 & 0.375 & 1.00 & 1.02 & 0.02 \\
+BiB M1 (s1/s2)      & .223/.156 & .050/.039 & 1.01/0.90 & 1.17/1.38 & 0.21 \\
+BiB $k{=}16$ s1     & $-0.451$  & 1.103     & 0.95      & 1.16      & 0.11 \\
+BiB $k{=}16$ s2     & \multicolumn{4}{c}{denoiser bitwise $\phi$-invariant (see text)} & n/a \\
+BiB $k{=}64$ (s1/s2)  & .776/.896   & .206/.216 & 0.97/0.99 & 1.16/1.11 & 0.45 \\
+BiB $k{=}256$ (s1/s2) & 1.439/1.532 & .424/.563 & 1.00/0.99 & 0.99/1.02 & 0.06 \\
+\end{tabular}
+\caption{Depth-window localization (calibrated units; shares of the
+full-depth steer). In every functional model, on-target control AND leakage
+both enter through the first quartile of layers; at TinyStories $k{=}64$,
+layer 0 alone carries $100\%$ of both. The negative BiB $k{=}16$ s1 control
+is the denoiser's residual response opposing its own steer direction under
+the weakened channel.}
+\label{tab:depth}
+\end{table}
+
+The profile is the same in all thirteen functional models on both corpora
+(Table~\ref{tab:depth}): control and leakage enter almost entirely through
+layers 0--2 of 12, with every later quartile near zero. Depth is therefore
+NOT where control and leakage dissociate; they share an entry point, and the
+grid closes into one sentence: the code is read once, early in depth, and
+the capacity pressure differentiates along trajectory time (terminal-step
+realization under mild pressure, early-time migration under extreme
+pressure, \S\ref{sec:toy}), not along network depth. One depth-specific
+signature does appear on biographies: single-layer steering is
+superadditive for leakage (layer-0-only steering leaks $1.9\times$ the
+full-depth steer at $k{=}64$ s1), so later layers partially compensate when
+they can also see the steer, another face of the conserved-pressure
+behavior of \S\ref{sec:mitig}.
+
+\paragraph{The abandoned code, anatomized.} The instrument also settles what
+the second BiB $k{=}16$ seed is. Its denoiser output is \emph{bitwise}
+invariant to the conditioning vector: perturbing $\phi$ by ten standard
+deviations changes no latent by any amount, on the production sampling path.
+Yet its decoded text swings wholesale with the steer, because ELF's decoder
+head, which is also $\phi$-conditioned, still reads the code that the
+denoiser has severed; the model's generations are meanwhile degenerate
+repetitive text, a quality collapse that per-seed gating would have caught.
+Every puzzle this model posed dissolves at once: its probe reads clean
+(the encoder-side code is intact), its natural variation reads zero (the
+denoiser, which natvar interrogates, truly ignores $\phi$), and its
+fleet-maximum measured leakage is real but travels entirely through the
+decoder-conditioning channel. The targeting law's scope is thereby exact:
+natural variation predicts leakage carried by the denoiser's conditional
+response; leakage that switches carriers is invisible to it by construction.
+For practitioners the lesson is uncomfortable: a conditioning pathway can
+die in the component you are monitoring and survive in one you are not, and
+every code-space diagnostic will read clean while it does.
+
+\paragraph{Carrier shares, measured factorially.} The anatomy generalizes
+into an instrument. Crossing the two conditioning sites at inference,
+latents generated with $\phi_{\mathrm{gen}} \in \{\text{base},
+\text{steer}\}$ and each decoded with $\phi_{\mathrm{dec}} \in
+\{\text{base}, \text{steer}\}$, decomposes every model's measured steering
+effect into a denoiser share and a decoder share under the standard
+text-level readout (Table~\ref{tab:channels}). In all thirteen functional
+models the denoiser carries essentially everything: $0.95$--$1.01$ of
+control and $0.93$--$1.06$ of leakage on TinyStories and the functional BiB
+fleet, with decoder shares at or below $0.10$ for leakage (BiB decoder
+control shares reach $0.28$ at $k{=}16$ s1, a real but minor secondary
+channel). The severed model is the exact complement: denoiser share $0.00$
+on both quantities, decoder share $1.00$ on both. ``The leak is
+manufactured in the denoiser'' is thereby a measured allocation, not an
+inference, and the one exception proves the accounting: when the denoiser
+stops reading the code, its share goes to zero and the decoder inherits the
+entire effect.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l cc cc}
+& \multicolumn{2}{c}{denoiser share} & \multicolumn{2}{c}{decoder share} \\
+& ctrl & leak & ctrl & leak \\
+\hline
+TinyStories, all 6 models        & $.95$--$1.01$ & $.96$--$1.01$ & $.01$--$.06$ & $.01$--$.10$ \\
+BiB, 7 functional models         & $.74$--$.97$  & $.66$--$1.06$ & $.07$--$.28$ & $.00$--$.09^{*}$ \\
+BiB $k{=}16$ s2 (severed read)   & $0.00$        & $0.00$        & $\mathbf{1.00}$ & $\mathbf{1.00}$ \\
+\end{tabular}
+\caption{Factorial carrier decomposition ($\phi_{\mathrm{gen}} \times
+\phi_{\mathrm{dec}}$ crossed at inference, shares of the standard
+both-steered effect). $^{*}$BiB M1 s1's decoder leak share reads $0.56$ of a
+near-zero total ($0.055$) and is excluded from the range as
+share-of-nothing noise.}
+\label{tab:channels}
+\end{table}
+
+\paragraph{Routing $\phi$ at training time.} The decomposition above is
+inference-time attribution; the causal version is to train the routing
+in. Two additional $k{=}16$ models were trained under the identical
+budget with $\phi$ visible to exactly one component: a denoiser-only arm
+(decode pass never conditioned) and a decoder-only arm (denoiser never
+conditioned), each evaluated with $\phi$ delivered exactly as trained
+(Table~\ref{tab:route}). The denoiser-only arm is a normal $k{=}16$ on
+every instrument: leakage $0.729$ against the $0.47$--$0.82$ seed band,
+natural variation $0.217$ against the $.205$--$.218$ band, carrier
+shares $0.93/0.92$ denoiser, and even the same marginal quality-gate
+signature ($+.016$ vs.\ $+.008$--$+.018$ across ordinary $k{=}16$
+seeds). Removing the decoder's access to $\phi$ removes nothing that
+matters: the denoiser pathway alone manufactures the full phenomenology,
+leak included. The decoder-only arm is not the mirror image; it is a
+failure to condition at all. Steering its code moves no source attribute
+($-0.05$ to $+0.02$), its same-$\phi$ generations are less similar than
+its cross-$\phi$ ones (margin $-0.10$), and its variation at fixed code
+is $3$--$5\times$ the $k{=}16$ band, the signature of an unconditional
+generator. A single decode pass cannot even establish control, let alone
+clean control. This sharpens the severed-model story of
+Table~\ref{tab:channels}: decoder carriage of the kind BiB $k{=}16$ s2
+exhibits can arise only as a residue of joint training that later
+abandoned the denoiser read; it is not a trainable alternative. There is
+no decoder-only escape route from denoiser leakage, because that route
+carries no control to escape with.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l ccc}
+& $k{=}16$ (both) & denoiser-only & decoder-only \\
+\hline
+pairs leakage (12 targets)       & $0.821$ & $0.729$ & n/a$^{\ddagger}$ \\
+mean on-target control           & $0.67$  & $0.62$  & $-0.02$ \\
+natural variation at fixed code  & $0.210$ & $0.217$ & $0.720$ \\
+quality-gate margin              & $+.018$ & $+.016$ & $-.100$ \\
+denoiser carrier share (ctrl/leak) & $.95$\,/\,$.95$ & $.93$\,/\,$.92$ & n/a$^{\ddagger}$ \\
+\end{tabular}
+\caption{Training-time $\phi$-routing ablation (TinyStories $k{=}16$,
+matched budget, evals conditioned as trained). $^{\ddagger}$With zero
+on-target control the leakage-per-control readout is undefined (raw
+drift $0.422$), and the carrier instrument is invalid on this arm: it
+injects $\phi$ tokens into the never-conditioned denoiser through the
+parameter-shared projection, an out-of-distribution perturbation that
+sixty recursive sampling steps amplify into a spurious full-strength
+share.}
+\label{tab:route}
+\end{table}
+
+\paragraph{Depth anchors at $24$ layers.} Doubling model depth under the
+identical optimizer budget (ELF-M, $24$ layers vs.\ ELF-B's $12$, two
+training seeds per condition) replicates every fixed point and
+amplifies the harm (Table~\ref{tab:elfm}). The full-rank floor is
+depth-stable on all three instruments in both seeds: leakage
+$0.450$/$0.473$ against ELF-B's $0.430$, control saturated, natural
+variation $.158$/$.154$ against $.164$. The bottleneck's natural
+variation excess is also depth-stable ($.212$/$.219$ against $.210$),
+exactly as the capacity mechanism predicts: overlap is a property of
+the code, not of the network reading it. What depth changes is the
+price. At $24$ layers $k{=}16$'s on-target control collapses from
+$0.67$ to $0.33$ in both seeds, while leakage stays high
+($0.663$/$1.470$), so normalized leakage rises from $1.2$ to
+$2.0$/$4.4$ against a flat $0.45$/$0.47$ floor. Quality gates: both M1
+seeds pass cleanly ($+.052$/$+.054$); the $k{=}16$ seeds sit at the
+familiar $k{=}16$ margin ($+.020$ and $+.017$ against the $.02$ bar,
+one just above, one just below). The control degradation that appeared
+only on the harder corpus at $12$ layers (\S\ref{sec:bib}) thus appears
+on TinyStories itself at $24$: the ``compounding'' harm is capacity
+pressure made visible by scale, not a corpus quirk.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l cc cc}
+& \multicolumn{2}{c}{$12$ layers (ELF-B)} & \multicolumn{2}{c}{$24$ layers (ELF-M), s1/s2} \\
+& M1 & $k{=}16$ & M1 & $k{=}16$ \\
+\hline
+pairs leakage (12 targets)      & $0.430$ & $0.821$ & $0.450$\,/\,$0.473$ & $0.663$\,/\,$1.470$ \\
+mean on-target control          & $1.00$  & $0.67$  & $1.00$\,/\,$1.00$   & $0.33$\,/\,$0.33$  \\
+leakage per unit control        & $0.43$  & $1.22$  & $0.45$\,/\,$0.47$   & $2.03$\,/\,$4.41$  \\
+natural variation at fixed code & $.164$  & $.210$  & $.158$\,/\,$.154$   & $.212$\,/\,$.219$  \\
+\end{tabular}
+\caption{Scale anchors: identical budget, doubled depth, two seeds at
+$24$ layers. The full-rank floor and the bottleneck's variation excess
+are depth-stable; the bottleneck's control collapses identically in
+both seeds, so its normalized leakage grows several-fold.}
+\label{tab:elfm}
+\end{table}
+
 % ===========================================================================
 \section{Discussion}
 % ===========================================================================
 Contrary to the intuition that a compact ``semantic manifold'' code yields cleaner,
 more disentangled control, we find a low-rank conditioning code induces attribute
 superposition and worse linear separability than full-rank conditioning, while
-retaining single-factor controllability down to moderate $k$ (control survives until
-the extreme $k{=}8$ bottleneck, where it collapses together with leakage). The
+retaining single-factor controllability down to moderate $k$ on TinyStories
+(control survives until the extreme $k{=}8$ bottleneck, where it collapses
+together with leakage; on biographies it degrades already by $k{=}64$,
+\S\ref{sec:bib}). The
 directly measured superposition is the robust core of the result: strictly monotone
 in $1/k$ across six code sizes and five seeds, co-varying with leakage at $r{=}0.90$.
 The behavioral leakage corroborates this in the mean but is noisier and exposes two
@@ -520,25 +1122,62 @@ $k{=}d$).
 
 The interventions and the pair-level analysis then fix the interpretation. The
 probe--leakage correlation is a between-model regularity: within a model,
-interference does not pick out which pairs leak; target fragility does
-(\S\ref{sec:superpos}). The probe is a thermometer for aggregate capacity pressure,
-not a circuit-level map. The geometry is not the lever: regularizing it reroutes,
-destroys, or disconnects, and inference-time surgery finds nothing linearly readable
-to remove (\S\ref{sec:mitig}). The data are not the lever either
-(\S\ref{sec:rho}). What remains, and what moves both quantities monotonically, is
-the dimension of the bottleneck. Compact semantic codes do not merely fail to
-disentangle; they manufacture entanglement, inside the generation pathway, that
-neither cleaner data nor geometric regularization removes.
+interference does not pick out which pairs leak; the denoiser's natural variation
+does (\S\ref{sec:law}), and does so predictively under preregistration. Leakage is
+\emph{biased natural variation}: it lands on the attributes the generation pathway
+already fluctuates in, which is why it survives every decontamination of the code,
+the data, and the injected vector. The probe is a thermometer for aggregate
+capacity pressure, not a circuit-level map. The geometry is not the lever: regularizing it reroutes,
+destroys, or disconnects, and inference-time surgery finds nothing readable
+to remove in any basis we tried (\S\ref{sec:mitig}). The data are not the lever either
+(\S\ref{sec:rho}). The generation pathway is: pinning a single counterfactual
+direction there delivers the study's only leakage reduction, eliminates the
+protected pair's terminal-step realization, and switches off the natural
+variation mode that carries it, yet the pressure resurfaces on untrained routes
+into the same attribute. In depth, that pathway reads the code exactly once,
+in the entry layers, in every model we measured (\S\ref{sec:depth}); the
+differentiation between control and leakage is temporal, not architectural.
+What remains, and what moves both quantities monotonically, is the dimension
+of the bottleneck. The second corpus turns this into a warning with teeth:
+where the corpus is harder, the same bottleneck also costs the control it
+was meant to provide, leaks more per unit of what remains, and can fail in a
+mode that every code-space diagnostic reads as clean: a denoiser that has
+severed its code read bitwise, in the fleet's leakiest model, whose leak
+rides the $\phi$-conditioned decoder head instead. Conditioning pathways can
+change carriers, and instruments aimed at one carrier are blind to the
+other; only carrier-level behavioral tests caught it here. Compact semantic
+codes do not merely fail to disentangle; they manufacture entanglement,
+inside the generation pathway, that neither cleaner data nor geometric
+regularization removes, and that pathway-level pinning only redistributes.
 
 \paragraph{Limitations.} The $\phi$ sweep has two model seeds per $k{=}64$ condition
-(Table~\ref{tab:rho}); the $k$ sweep of Tables~\ref{tab:leakrobust}
-and~\ref{tab:superpos} remains one model per $k$, so adjacent-$k$ separation still
-rests on eval-seed error bars. The within-model pair analysis covers four attributes (twelve directed
-pairs) in one corpus; the steerability collapse at high $\lambda$ has not been
-distinguished from generation-quality collapse. The study is on TinyStories with
-lexicon labels throughout. A \emph{training-time} generation-pathway mitigation
-(e.g.\ an adversary on the decoder output) remains open; our inference-time result
-rules out only linear surgery on the conditioning vector. We view the
+(Table~\ref{tab:rho}), and the $k$ sweep now has two model seeds at $k{=}16$ and
+$k{=}64$ (\S\ref{sec:leak}): the aggregate probe metrics and the endpoint gap
+replicate across seeds, but Tables~\ref{tab:leakrobust}--\ref{tab:superpos}
+report seed-1 numbers and adjacent-$k$ behavioral ordering should be read as a
+trend only. The within-model analysis covers twelve lexicon-labeled attributes in one corpus,
+with the four core attributes as steering sources; the steerability collapse at
+high $\lambda$ has not been distinguished from generation-quality collapse. The
+mechanism study is on TinyStories with lexicon labels throughout; the Bias in
+Bios replication (\S\ref{sec:bib}) transfers the capacity result and the
+localization dissociation but rests on two model seeds per condition and one
+source-target pair, its round-2 registered pooled test fails whenever the
+degenerate-code model is included (the functional-model result carries the
+replication), and the second $k{=}16$ seed is quality-collapsed, which our
+seed-1-only sanity gate did not test: generation-quality gates belong on
+every training seed. The targeting law's scope is correspondingly bounded:
+natural variation predicts leakage carried by the denoiser's conditional
+response, and says nothing about leakage that travels through other
+conditioned components such as the decoder head (\S\ref{sec:depth}). The
+depth-window result is one architecture family at one scale. The training-time generation-pathway mitigation of
+\S\ref{sec:mitig} is the directed test the localization calls for; at the
+weights evaluated so far it either changes nothing or buys terminal-step
+suppression at the price of text-level control, and our inference-time result
+rules out only linear surgery on the conditioning vector. Relatedly, most of our readouts use linear classifier directions in the frozen
+embedding space; the sparse-dictionary check of \S\ref{sec:mitig} finds the
+injected delta at chance in a 4096-feature basis with a validated instrument,
+so the vector-content null is not a linear-basis artifact, though richer or
+better-trained dictionaries could still read differently. We view the
 contribution as reframing this conditioning design from a controllability method
 toward a study of how the geometry of the conditioning variable relates to
 disentanglement, connecting controllable generation to the superposition phenomenon
